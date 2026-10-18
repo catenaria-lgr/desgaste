@@ -537,7 +537,9 @@ table.rd-t { border-collapse: collapse; width: 100%; font-size: 13.5px; font-var
 .rd-noimp .ay-chico { width: 34px; height: 34px; }
 
 .ay-sug { background: #fff; border-radius: 12px; padding: 14px 16px; margin-top: 16px; display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
-.ay-sug p { margin: 0; flex: 1 1 260px; }
+.ay-sug p { margin: 0; flex: 1 1 100%; }
+.ay-sug-bot { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.ay-sug .rd-okc { flex: 1 1 100%; color: var(--ok, #2e7d4f); font-size: 13px; }
 </style>
 <script>
   /* Antes de que supabase-js lea y limpie la dirección: ¿venimos del link de
@@ -6263,14 +6265,37 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
   var ultimaPantalla = null;
   function recordar() { var hs = location.hash || '#/'; if (hs.indexOf('#/ayuda') !== 0) ultimaPantalla = hs; }
   recordar(); global.addEventListener('hashchange', recordar);
-  function mailSugerencia(ctx) {
+  var ASUNTO = '[App desgaste] Sugerencia';
+  function cuerpoSugerencia(ctx) {
     var s = ctx.sesion || {}, base = location.href.split('#')[0];
-    var cuerpo = 'Qué pasó o qué propongo:\n\n\n' +
+    return 'Qué pasó o qué propongo:\n\n\n' +
       '— Datos para ubicar la sugerencia (no borrar) —\n' +
       'Usuario: ' + (s.nombre || s.mail || '') + (s.rol ? ' (' + s.rol + (s.cargo ? ', ' + s.cargo : '') + ')' : '') + '\n' +
       'Pantalla: ' + base + (ultimaPantalla || '#/') + '\n' +
       'Navegador: ' + navigator.userAgent.slice(0, 120);
-    return 'mailto:' + MAIL_SUGERENCIAS + '?subject=' + encodeURIComponent('[App desgaste] Sugerencia') + '&body=' + encodeURIComponent(cuerpo);
+  }
+  function mailSugerencia(ctx) {
+    return 'mailto:' + MAIL_SUGERENCIAS + '?subject=' + encodeURIComponent(ASUNTO) + '&body=' + encodeURIComponent(cuerpoSugerencia(ctx));
+  }
+  // 17/10: el «mailto» no hace nada si la PC no tiene un programa de correo configurado (correo web).
+  // Por eso tres caminos: Outlook web (correo institucional), el programa de correo de la PC, o copiar el texto.
+  function bloqueSugerencia(ctx) {
+    var c = cuerpoSugerencia(ctx), q = function (x) { return encodeURIComponent(x); };
+    var outlook = 'https://outlook.office.com/mail/deeplink/compose?to=' + q(MAIL_SUGERENCIAS) + '&subject=' + q(ASUNTO) + '&body=' + q(c);
+    var ok = h('span', { class: 'rd-okc', role: 'status' });
+    var copiar = h('button', { class: 'btn lnk chico', type: 'button' }, 'Copiar el texto');
+    copiar.addEventListener('click', async function () {
+      var t = 'Para: ' + MAIL_SUGERENCIAS + '\nAsunto: ' + ASUNTO + '\n\n' + c;
+      try { await navigator.clipboard.writeText(t); ok.textContent = 'Copiado. Pegalo en un mail nuevo a ' + MAIL_SUGERENCIAS + '.'; }
+      catch (e) { ok.textContent = 'El navegador no dejó copiar. Escribí a ' + MAIL_SUGERENCIAS + '.'; }
+    });
+    return h('div', { class: 'ay-sug' },
+      h('p', null, h('b', null, '¿Algo no se entiende, falta o se puede mejorar? '), 'Contanos tu experiencia: se abre un mail ya armado a ' + MAIL_SUGERENCIAS + ', lo completás y lo mandás.'),
+      h('div', { class: 'ay-sug-bot' },
+        h('a', { class: 'btn chico', href: outlook, target: '_blank', rel: 'noopener' }, 'Mandar desde Outlook (correo institucional)'),
+        h('a', { class: 'btn sec chico', href: mailSugerencia(ctx) }, 'Abrir mi programa de correo'),
+        copiar),
+      ok);
   }
 
   async function pantalla(ctx) {
@@ -6294,8 +6319,7 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
       UI.encabezado('Ayuda', 'Tocá una pregunta para ver los pasos.'),
       UI.card(null, null, h('div', { class: 'ay-lista' }, items.slice(0, items.length - tec))),
       tec ? UI.card(ctx.tec && !adm ? 'Para operadores' : 'Para operadores y administradores', null, h('div', { class: 'ay-lista' }, items.slice(items.length - tec))) : null,
-      h('div', { class: 'ay-sug' }, h('p', null, h('b', null, '¿Algo no se entiende, falta o se puede mejorar? '), 'Contanos tu experiencia: se abre un mail ya armado, lo completás y lo mandás.'),
-        h('a', { class: 'btn sec chico', href: mailSugerencia(ctx) }, 'Mandar una sugerencia')),
+      bloqueSugerencia(ctx),
       h('p', { class: 'nota ay-pie' }, 'Datos: mediciones del Geismar 201. Cada vano muestra su última medición con dato válido.'));
     if (abrir) { var el = document.getElementById('ay-' + abrir); if (el) el.scrollIntoView({ block: 'start' }); }
   }
