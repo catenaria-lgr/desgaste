@@ -2203,7 +2203,7 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
     }
 
     var msg = h('div');
-    if (ctx.query.link === 'invalido') msg.appendChild(UI.mensaje('error', 'El link del mail venció o ya se usó. Pedí uno nuevo con «Olvidé mi contraseña».'));
+    if (ctx.query.link === 'invalido') msg.appendChild(UI.mensaje('error', 'El link del mail venció o ya se usó. Pedile a un administrador de la app que te reinicie la contraseña.'));
     else if (ctx.query.volver) msg.appendChild(UI.mensaje('info', 'Esa pantalla es para operadores y administradores. Ingresá para verla.'));
 
     var mail = h('input', { id: 'ing-mail', type: 'email', autocomplete: 'username', inputmode: 'email', required: true, autocapitalize: 'off', spellcheck: 'false' });
@@ -2249,7 +2249,9 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
       h('p', { class: 'nota' }, 'Te mandamos un link por mail para definir una contraseña nueva.'),
       h('div', { class: 'campo' }, h('label', { for: 'rec-mail' }, 'Mail'), recMail), recMsg,
       h('div', { class: 'acciones' }, recBoton, h('button', { type: 'button', class: 'btn lnk', onclick: function () { rec.hidden = true; form.hidden = false; } }, 'Volver')));
-    function mostrarRecuperar() { recMail.value = mail.value; form.hidden = true; rec.hidden = false; recMail.focus(); }
+    // 16/10: el correo institucional quita los links de los mails externos (el de Supabase llega sin link).
+    // La recuperación es por un administrador (Usuarios → Reiniciar contraseña). El formulario por mail queda guardado, sin uso.
+    function mostrarRecuperar() { msg.replaceChildren(UI.mensaje('info', 'Pedile a un administrador de la app que te reinicie la contraseña: te pasa una provisoria y al entrar elegís una nueva.')); }
     rec.addEventListener('submit', async function (e) {
       e.preventDefault();
       recMsg.replaceChildren();
