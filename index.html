@@ -521,6 +521,20 @@ table.rd-t { border-collapse: collapse; width: 100%; font-size: 13.5px; font-var
   .rd-hoja h3 { break-after: avoid; }
 }
 
+
+/* c32 · Ayuda */
+.nav-pc a.ayuda { width: 30px; height: 30px; padding: 0; display: inline-flex; align-items: center; justify-content: center; border: 1px solid var(--line); border-radius: 50%; font-weight: 700; margin-right: 6px; }
+.ay-lista { display: grid; gap: 6px; }
+.ay-preg { border: 1px solid var(--line); border-radius: 10px; padding: 0 14px; background: #fff; scroll-margin-top: 90px; }
+.ay-preg > summary { cursor: pointer; padding: 12px 0; font-weight: 500; list-style: none; display: flex; justify-content: space-between; gap: 10px; }
+.ay-preg > summary::-webkit-details-marker { display: none; }
+.ay-preg > summary::after { content: '+'; font-weight: 400; font-size: 20px; line-height: 1; color: #6b6b6b; }
+.ay-preg[open] > summary::after { content: '–'; }
+.ay-preg ol { margin: 0 0 10px; padding-left: 20px; } .ay-preg li { margin: 4px 0; line-height: 1.45; }
+.ay-ir { margin: 0 0 12px; }
+.ay-pie { margin-top: 12px; }
+.ay-chico { display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px; border-radius: 50%; border: 1px solid var(--line); background: #fff; font-size: 13px; font-weight: 700; text-decoration: none; color: inherit; vertical-align: middle; }
+.rd-noimp .ay-chico { width: 34px; height: 34px; }
 </style>
 <script>
   /* Antes de que supabase-js lea y limpie la dirección: ¿venimos del link de
@@ -3127,7 +3141,7 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
     imprimir.addEventListener('click', function () { window.print(); });
     ctx.el.replaceChildren(
       h('div', { class: 'rd-noimp' }, cabecera('Informe · ' + o.nom, 'Mismo informe para la guardia, una anomalía o un pedido de intervención. Elegí el motivo, completá e imprimilo o guardalo en PDF.',
-        [boton(o.back, '← Volver'), imprimir])),
+        [boton(o.back, '← Volver'), imprimir, Ayuda.boton('informe', 'Ayuda: cómo armar el informe')])),   // c32
       h('div', { class: 'rd-noimp' }, UI.card('Datos del informe', null, h('div', { class: 'rd-form' },
         h('label', { for: 'inf-motivo' }, 'Motivo', selM), h('label', { for: 'inf-emite' }, 'Emite', inEm),
         h('label', { for: 'inf-accion', class: 'ancho' }, 'Acción pedida', inAcc), h('label', { for: 'inf-obs', class: 'ancho' }, 'Observaciones', inObs)))),
@@ -4718,7 +4732,7 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
     var ref = await ctx.ref();
     if (!ctx.vigente()) return;
     if (ref.error) return Pantallas.errorBase(ctx, ref.error);
-    var cab = UI.encabezado('Listados', 'Elegí qué querés saber.');
+    var cab = UI.encabezado('Listados', ['Elegí qué querés saber. ', Ayuda.boton('verificar', 'Ayuda: qué significa cada lista')]);   // c32
     if (!ref.versionVigente) return ctx.el.replaceChildren(cab, Pantallas.sinPlanilla());
     ctx.el.replaceChildren(cab, h('div', { class: 'cargando' }, 'Leyendo el estado de los vanos…'));
     var r = await cargarRed(ref);
@@ -6144,6 +6158,138 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
 })();
 
 </script>
+<script>/* js/pantallas/ayuda.js */
+/* =====================================================================
+ * Ayuda (tarea c32, 17/10/2026) — ruta #/ayuda[?p=<pregunta>]
+ * Organizada por PREGUNTAS (no por pantallas), cada una con 3–4 pasos y botón «Ir».
+ * Según el perfil: Análisis y gestión ve lo suyo; operadores suman Revisión y Mediciones;
+ * administradores suman Usuarios. Se lee en 2 minutos desde el celular.
+ * Los umbrales salen de la base (ctx.ref().perfiles), no del código.
+ * REGLA (cambios_c05.md): cada cambio de pantalla revisa también esta ayuda.
+ * ===================================================================== */
+(function (global) {
+  'use strict';
+  var h = UI.h;
+
+  function umbrales(ref) {
+    var p = (ref && ref.perfiles) || {}, s = Object.keys(p).sort().reverse();
+    if (!s.length) return null;
+    return s.map(function (k) {
+      var x = p[k];
+      return 'Hilo ' + k + ' mm²: nuevo ' + UI.num(x.nominal, 2) + ' mm · alerta ' + (x.alerta != null ? UI.num(x.alerta, 1) : '—') +
+        ' mm · límite ' + UI.num(x.limite, 1) + ' mm.';
+    });
+  }
+
+  // Cada pregunta: id (para ?p=), quién la ve, título, pasos y botón «Ir».
+  function preguntas(ref) {
+    var u = umbrales(ref);
+    return [
+      { id: 'red', para: 'todos', q: '¿Cómo está la red hoy?', pasos: [
+        'Abrí Inicio: cada tramo tiene el color de su peor vano. Rojo = algún vano crítico; ámbar = alguno en alerta; verde = todos normales.',
+        'Tocá un tramo y elegí la vía. Vas bajando: tramo → entre estaciones → cantón → vano.',
+        'En cada nivel ves piquetes y progresiva, el gráfico del hilo y la lista para seguir bajando.'],
+        ir: ['#/', 'Ir a Inicio'] },
+      { id: 'atender', para: 'todos', q: '¿Qué vanos hay que atender?', pasos: [
+        'Listados → Para atender: vanos críticos y en alerta, del más gastado al menos gastado.',
+        'Filtrá por tramo y vía para ver solo tu zona.',
+        'Tocá un vano para ver su ficha, o «Exportar a Excel» para mandar la lista.'],
+        ir: ['#/listados/atender', 'Ir a Para atender'] },
+      { id: 'verificar', para: 'todos', q: '¿Qué conviene verificar en campo?', pasos: [
+        'Listados → Para verificar en campo: valores bajos que todavía no están confirmados.',
+        '«Dato a confirmar»: una sola lectura dio un valor bajo y nadie confirmó todavía si es real o un error del equipo. Mientras tanto cuenta como real.',
+        '«Medido solo en parte»: el equipo leyó menos de la mitad del vano y lo leído da alerta o crítico. No cambia el estado, pero conviene mirarlo.',
+        'La lista incluye lecturas aisladas que todavía nadie revisó: no todo lo que aparece es un problema.'],
+        ir: ['#/listados/verificar', 'Ir a Para verificar'] },
+      { id: 'sininfo', para: 'todos', q: '¿Dónde no hay información reciente?', pasos: [
+        'Listados → Sin información reciente: vanos sin medición válida o con la última de hace más de 1 año.',
+        'Sirve para pedir que se incluyan en la próxima medición del Geismar.'],
+        ir: ['#/listados/sininfo', 'Ir a Sin información reciente'] },
+      { id: 'piquete', para: 'todos', q: '¿Cómo busco un piquete o una estación?', pasos: [
+        'Por piquetes → escribí el código del piquete (por ejemplo 7-21-5) y tocá Buscar: abre la ficha del vano que arranca ahí.',
+        'Con «Hasta piquete» ves un rango: estado, gráfico y todos los vanos.',
+        'También podés escribir el nombre de una estación (por ejemplo Llavallol).',
+        'En los tramos 1 y 3 (cuatro vías) puede pedirte que elijas la vía.'],
+        ir: ['#/piquetes', 'Ir a Por piquetes'] },
+      { id: 'informe', para: 'todos', q: '¿Cómo armo un informe para la guardia?', pasos: [
+        'Entrá a la ficha del vano o a la pantalla del cantón y tocá «Informe».',
+        'Elegí el motivo (verificación de la guardia, anomalía, tramo paralelo, cambio de cantón u otro). La acción pedida se completa sola y la podés cambiar.',
+        'Agregá observaciones si hace falta.',
+        'Tocá «Imprimir o guardar PDF» y mandalo por mail o imprimilo.'],
+        ir: null },
+      { id: 'palabras', para: 'todos', q: '¿Qué significa cada color y palabra?', pasos: [
+        'Crítico: el hilo llegó al límite. En alerta: está cerca. Normal: por encima de la alerta.',
+        'Altura del hilo: lo que queda del hilo de contacto, en mm. El estado sale de la altura mínima de todas las lecturas del vano.',
+        'Desgaste: cuánto del hilo útil ya se gastó. 100 % = llegó al límite.',
+        'Medido el: fecha de la última medición con dato en ese vano (cada vano puede tener su fecha).',
+        'Sin medición válida: el equipo pasó pero no dio un dato que sirva. Gris claro en el gráfico (15,49 mm constante) = no medido, nunca hilo nuevo.']
+        .concat(u ? [u.join(' ')] : []),
+        ir: null },
+      { id: 'grafico', para: 'todos', q: '¿Cómo uso el gráfico?', pasos: [
+        'PC: ruedita del mouse para acercar o alejar; arrastrá para moverte. Celular: dos dedos para el zoom, un dedo de costado para moverte.',
+        'Las líneas punteadas son la alerta y el límite. La franja de abajo es el estado actual de cada vano.',
+        'Tocá la franja o un piquete para abrir ese vano; la franja de cantones abre el cantón.'],
+        ir: null },
+      { id: 'cuenta', para: 'todos', q: '¿Cómo cambio mi contraseña o salgo?', pasos: [
+        'Tocá tu nombre, arriba a la derecha (en el celular: Más → Mi cuenta).',
+        'Ahí cambiás la contraseña o tocás «Salir». En una PC compartida, salí siempre al terminar.',
+        'Si te olvidaste la contraseña, pedile a un administrador de la app que te la reinicie: te pasa una provisoria y al entrar elegís una nueva.'],
+        ir: ['#/cuenta', 'Ir a Mi cuenta'] },
+      { id: 'revision', para: 'operador', q: '¿Cómo reviso una lectura dudosa?', pasos: [
+        'Trabajo → Revisión → Lecturas aisladas: las que definen el estado hoy van primero.',
+        'Abrí una lectura, mirá el gráfico y clasificala: «Real» o «Dato erróneo» (este último pide una nota con el motivo).',
+        'Para muchas de una misma zona, usá la pestaña Zonas y clasificá en lote.',
+        'Todo se puede deshacer y queda firmado con tu nombre y la fecha.'],
+        ir: ['#/revision', 'Ir a Revisión'] },
+      { id: 'mediciones', para: 'operador', q: '¿Cómo veo o anulo una medición?', pasos: [
+        'Mediciones: lista por tramo y vía; tocá una para ver el detalle y en cuántos vanos define hoy el estado.',
+        'Anular: botón en el detalle, con motivo obligatorio. No se deshace desde la app.',
+        'La carga de mediciones nuevas desde la app llega en la Etapa 2; mientras tanto la hace un administrador.'],
+        ir: ['#/mediciones', 'Ir a Mediciones'] },
+      { id: 'usuarios', para: 'admin', q: '¿Cómo doy de alta o de baja a un usuario?', pasos: [
+        'Administración → Usuarios → Agregar usuario: mail institucional, nombre, perfil (y cargo si es Análisis y gestión).',
+        'La app muestra una contraseña provisoria una sola vez: copiala con «Copiar para mandar» y pasásela al usuario. Al entrar la tiene que cambiar.',
+        'Olvido de contraseña: «Reiniciar contraseña» en su fila. Baja: «Desactivar» (tocando dos veces). Nunca se borra un usuario.',
+        'No desactives «Copia diaria (automática)»: lo usa la copia de seguridad todas las noches.'],
+        ir: ['#/admin/usuarios', 'Ir a Usuarios'] }
+    ];
+  }
+
+  async function pantalla(ctx) {
+    ctx.miga([{ texto: 'Ayuda' }]);
+    var ref = await ctx.ref();
+    if (!ctx.vigente()) return;
+    var adm = Conexion.puede(ctx.sesion, 'administrar');
+    var lista = preguntas(ref && !ref.error ? ref : null).filter(function (p) {
+      return p.para === 'todos' || (p.para === 'operador' && ctx.tec) || (p.para === 'admin' && adm);
+    });
+    var abrir = ctx.query.p || null;
+    var items = lista.map(function (p) {
+      var d = h('details', { class: 'ay-preg', id: 'ay-' + p.id, open: p.id === abrir ? true : null },
+        h('summary', null, p.q),
+        h('ol', null, p.pasos.map(function (t) { return h('li', null, t); })),
+        p.ir ? h('div', { class: 'ay-ir' }, h('a', { class: 'btn chico', href: p.ir[0] }, p.ir[1])) : null);
+      return d;
+    });
+    var tec = ctx.tec ? lista.filter(function (p) { return p.para !== 'todos'; }).length : 0;
+    ctx.el.replaceChildren(
+      UI.encabezado('Ayuda', 'Tocá una pregunta para ver los pasos.'),
+      UI.card(null, null, h('div', { class: 'ay-lista' }, items.slice(0, items.length - tec))),
+      tec ? UI.card(ctx.tec && !adm ? 'Para operadores' : 'Para operadores y administradores', null, h('div', { class: 'ay-lista' }, items.slice(items.length - tec))) : null,
+      h('p', { class: 'nota ay-pie' }, 'Datos: mediciones del Geismar 201. Cada vano muestra su última medición con dato válido. ¿Algo no se entiende o falta? Avisale a un administrador de la app.'));
+    if (abrir) { var el = document.getElementById('ay-' + abrir); if (el) el.scrollIntoView({ block: 'start' }); }
+  }
+
+  // Botón «?» chico para pantallas puntuales: lleva a la pregunta que corresponde.
+  function boton(id, texto) {
+    return h('a', { class: 'ay-chico', href: '#/ayuda?p=' + id, title: texto || 'Ayuda', 'aria-label': texto || 'Ayuda' }, '?');
+  }
+
+  Rutas.definir('/ayuda', { pantalla: pantalla, titulo: 'Ayuda', pestana: 'ayuda', requiere: 'usuario' });
+  global.Ayuda = { boton: boton };
+})(window);
+
+</script>
 <script>/* js/pantallas/usuarios.js */
 /* =====================================================================
  * P13 Usuarios   #/admin/usuarios   (tarea c11, 15/10/2026) — solo administradores
@@ -6495,6 +6641,7 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
       op ? h('a', { href: '#/trabajo', class: on('trabajo'), 'aria-current': cur('trabajo') }, 'Trabajo', contador()) : null,
       adm ? h('a', { href: '#/admin', class: on('admin'), 'aria-current': cur('admin') }, 'Administración') : null,
       h('span', { class: 'sep' }),
+      s && s.rol ? h('a', { href: '#/ayuda', class: 'ayuda ' + (on('ayuda') || ''), title: 'Ayuda: cómo usar la app', 'aria-label': 'Ayuda', 'aria-current': cur('ayuda') }, '?') : null,   // c32
       s && s.rol
         ? h('a', { href: '#/cuenta', class: 'usuario ' + (on('cuenta') || ''), title: 'Mi cuenta', 'aria-current': cur('cuenta') }, nombreCorto(s))
         : h('a', { href: '#/ingresar', class: 'discreto ' + (on('ingresar') || ''), 'aria-current': cur('ingresar') }, 'Ingresar')
@@ -6502,7 +6649,7 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
     document.getElementById('nav-pc').replaceChildren.apply(document.getElementById('nav-pc'), pc.filter(Boolean));
 
     // Celular: Inicio · Piquetes · Listados [· Trabajo] · Más
-    var enMas = ['mediciones', 'informes', 'admin', 'cuenta', 'ingresar'].indexOf(pestanaActual) >= 0;
+    var enMas = ['mediciones', 'informes', 'admin', 'cuenta', 'ingresar', 'ayuda'].indexOf(pestanaActual) >= 0;
     var cel = [
       h('a', { href: '#/', class: on('inicio'), 'aria-current': cur('inicio') }, icono('inicio'), 'Inicio'),
       h('a', { href: '#/piquetes', class: on('piquetes'), 'aria-current': cur('piquetes') }, icono('piquetes'), 'Piquetes'),
@@ -6521,6 +6668,7 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
     document.getElementById('hoja-items').replaceChildren.apply(document.getElementById('hoja-items'), [
       Conexion.puede(s, 'clasificar') ? it('mediciones', 'Mediciones', '#/mediciones') : null,   // s42: solo operadores y administradores
       adm ? it('admin', 'Administración', '#/admin') : null,
+      s && s.rol ? it('ayuda', 'Ayuda', '#/ayuda', 'cómo usar la app') : null,   // c32
       s && s.rol ? it('cuenta', 'Mi cuenta', '#/cuenta', nombreCorto(s)) : it('ingresar', 'Ingresar', '#/ingresar', 'con tu mail institucional')
     ].filter(Boolean));
     var hoja = document.getElementById('hoja-mas');
