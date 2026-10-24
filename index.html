@@ -1605,6 +1605,9 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
  *   var M = await Modelo.cargar(ref)        // se lee una vez y se guarda 2 min (Modelo.limpiar() lo descarta)
  *   await Modelo.parciales(M)                // lecturas parciales de toda la red (descarga las series necesarias)
  *   Modelo.segmentos(M, tramo, via)          // interestaciones de un tramo y vía
+ * c39 (23/10/2026): M.V tiene solo los vanos de VÍA PRINCIPAL (dentro de los límites de cada tramo, script 11): de ahí salen
+ *   la Red, los tramos, los listados y los conteos. M.TODOS y M.VID tienen todos (la ficha de un vano de cuadro sigue andando);
+ *   M.RV (por hoja y vía) también, con v.fuera = true en los de afuera. M.LIM = límites por hoja y vía.
  * ===================================================================== */
 (function (global) {
   'use strict';
@@ -1747,11 +1750,14 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
         .then(function (x) { return x.error ? { datos: [], error: null, faltaCampo: true } : x; }),
       // c38: cambios de sección 170 → 110 detectados en los datos (script 09). Si el 09 no está, se sigue sin ellos.
       Conexion.leerTodo('cambio_seccion', { columnas: 'id, recorrido, via, km, km_desde, km_hasta, de_seccion, a_seccion, piquetes, estado, evidencia' })
-        .then(function (x) { return x.error ? { datos: [], error: null, faltaSeccion: true } : x; })
+        .then(function (x) { return x.error ? { datos: [], error: null, faltaSeccion: true } : x; }),
+      // c39: límites de cada tramo sobre vía principal (script 11). Sin el 11 se sigue como antes (todo cuenta).
+      Conexion.leerTodo('limite_tramo', { columnas: 'id, recorrido, via, tramo, piquete_desde, piquete_hasta, km_desde, km_hasta' })
+        .then(function (x) { return x.error ? { datos: [], error: null, faltaLimites: true } : x; })
     ]);
     var err = rs.map(function (r) { return r.error; }).filter(Boolean)[0];
     if (err) return { error: err };
-    var M = { ref: ref, V: [], VID: {}, RV: {}, CANT: {}, EST: {}, MED: {}, ZON: {}, TRAMO: {}, CAL: {}, TN: {}, CSEC: {}, segs: {}, parcial: null, faltaCampo: !!rs[5].faltaCampo,
+    var M = { ref: ref, V: [], TODOS: [], VID: {}, RV: {}, LIM: {}, faltaLimites: !!rs[7].faltaLimites, CANT: {}, EST: {}, MED: {}, ZON: {}, TRAMO: {}, CAL: {}, TN: {}, CSEC: {}, segs: {}, parcial: null, faltaCampo: !!rs[5].faltaCampo,
               faltaSeccion: !!rs[6].faltaSeccion,
               tiempos: { estado: tE, total: performance.now() - t0, via: rs[0].via } };
     ref.tramos.forEach(function (t) { M.TRAMO[t.numero] = t; });
@@ -1777,11 +1783,14 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       (M.CAL[k] = M.CAL[k] || []).push({ km: +l.km, mm: +l.valor_mm, fecha: ve.fecha, verificacion_id: l.verificacion_id, piquete: l.piquete, m: +l.m });
     });
     Object.keys(M.CAL).forEach(function (k) { M.CAL[k].sort(function (a, b) { return a.km - b.km; }); });
+    rs[7].datos.forEach(function (l) { var k = l.recorrido + '|' + l.via; (M.LIM[k] = M.LIM[k] || []).push({ tramo: l.tramo, a: +l.km_desde, b: +l.km_hasta, desde: l.piquete_desde, hasta: l.piquete_hasta }); });
     rs[0].datos.forEach(function (v) {
       v.ki = +v.km_inicio; v.kf = +v.km_fin; v.mid = (v.ki + v.kf) / 2; v.L = v.largo_m != null ? +v.largo_m : 0;
       v.val = v.valor_mm != null ? +v.valor_mm : null;
       var c = v.canton_id ? M.CANT[v.canton_id] : null; v.cnum = c ? c.numero : null;
-      M.V.push(v); M.VID[v.vano_id] = v;
+      v.fuera = v.via_principal === false;   // c39: fuera de vía principal (cuadro de estación o unión entre tramos)
+      if (!v.fuera) M.V.push(v);
+      M.TODOS.push(v); M.VID[v.vano_id] = v;
       var k = v.recorrido + '|' + v.via; (M.RV[k] = M.RV[k] || []).push(v);
     });
     Object.keys(M.RV).forEach(function (k) { M.RV[k].sort(function (a, b) { return a.ki - b.ki; }); M.RV[k].forEach(function (v, i) { v.i = i; }); });
@@ -1822,7 +1831,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
         var m = M.MED[mid]; if (!m || !m.storage_path) { fallas++; return; }
         var s; try { s = await Serie.leer(m); } catch (e) { fallas++; return; }
         porMed[mid].forEach(function (l) {
-          var v = M.VID[l.vano_id]; if (!v) return;
+          var v = M.VID[l.vano_id]; if (!v || v.fuera) return;
           var x = minEnVano(s, v.ki, v.kf); if (!x) return;
           (v.parciales = v.parciales || []).push({ val: x.val, km: x.km, n: x.n, fecha: l.fecha, cobertura: +l.cobertura, med: m });
           if (v.fecha_dato && l.fecha <= v.fecha_dato) return;
@@ -1852,13 +1861,13 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       : (dentro.length && nombreIgual(dentro[dentro.length - 1].nombre, T.hasta)) ? { nombre: 'fin de la planilla', km: kB, sinMarca: true, fin: true }
       : { nombre: T.hasta, km: kB, sinMarca: true };
     var pts = [ini].concat(dentro).concat([fin]), segs = [];
-    var vAntes = todos.filter(function (v) { return v.kf <= kA + 1e-6 && v.tramo !== t; }).pop(), vDesp = todos.filter(function (v) { return v.ki >= kB - 1e-6 && v.tramo !== t; })[0];
+    var vAntes = todos.filter(function (v) { return v.kf <= kA + 1e-6 && (v.tramo !== t || v.fuera); }).pop(), vDesp = todos.filter(function (v) { return v.ki >= kB - 1e-6 && (v.tramo !== t || v.fuera); })[0];
     for (var i = 0; i < pts.length - 1; i++) {
       var a = i === 0 ? kA : pts[i].km, b = i === pts.length - 2 ? kB : pts[i + 1].km, ultimo = i === pts.length - 2;
       var sv = vs.filter(function (v) { return v.mid >= a - 1e-9 && (v.mid < b || ultimo); });
       var s = { t: t, via: via, rec: rec, A: pts[i], B: pts[i + 1], vanos: sv, ki: sv.length ? sv[0].ki : a, kf: sv.length ? sv[sv.length - 1].kf : b, notas: [] };
-      if (i === 0 && vAntes && antes && antes.km < kA - 0.05) s.notas.push('Desde ' + s.A.nombre + ' hasta ' + km(kA) + ' es tramo ' + vAntes.tramo + '.');
-      if (ultimo && vDesp && despues && despues.km > kB + 0.05) s.notas.push('Desde ' + km(kB) + ' hasta ' + s.B.nombre + ' es tramo ' + vDesp.tramo + '.');
+      if (i === 0 && vAntes && antes && antes.km < kA - 0.05) s.notas.push('Desde ' + s.A.nombre + ' hasta ' + km(kA) + (vAntes.fuera ? ' queda fuera de vía principal (cuadro de estación o unión entre tramos): no se cuenta.' : ' es tramo ' + vAntes.tramo + '.'));
+      if (ultimo && vDesp && despues && despues.km > kB + 0.05) s.notas.push('Desde ' + km(kB) + ' hasta ' + s.B.nombre + (vDesp.fuera ? ' queda fuera de vía principal (cuadro de estación o unión entre tramos): no se cuenta.' : ' es tramo ' + vDesp.tramo + '.'));
       if (sv.length) segs.push(s);
     }
     var usados = {};
@@ -1934,10 +1943,12 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
   // c38: tramos neutros (planilla) y cambios de sección (datos) de una hoja y vía entre a y b
   function neutrosEn(M, rec, via, a, b) { return ((M.TN || {})[rec + '|' + via] || []).filter(function (p) { return p.km >= a - 1e-6 && p.km <= b + 1e-6; }); }
   function seccionesEn(M, rec, via, a, b) { return ((M.CSEC || {})[rec + '|' + via] || []).filter(function (p) { return (p.b != null ? p.b : p.km) >= a - 1e-6 && (p.a != null ? p.a : p.km) <= b + 1e-6; }); }
+  // c39: límites del tramo t en una hoja y vía (o null si el script 11 no está)
+  function limiteDe(M, rec, via, t) { return ((M.LIM || {})[rec + '|' + via] || []).filter(function (l) { return l.tramo === t; })[0] || null; }
   function calibreEn(M, rec, via, a, b) { return (M.CAL[rec + '|' + via] || []).filter(function (p) { return p.km >= a - 1e-6 && p.km <= b + 1e-6; }); }
 
   global.Modelo = {
-    cargar: cargar, calibreEn: calibreEn, neutrosEn: neutrosEn, seccionesEn: seccionesEn, filtrarEstado: filtrarEstado, limpiar: limpiar, parciales: parciales, minEnVano: minEnVano, nivel: nivel,
+    cargar: cargar, calibreEn: calibreEn, limiteDe: limiteDe, neutrosEn: neutrosEn, seccionesEn: seccionesEn, filtrarEstado: filtrarEstado, limpiar: limpiar, parciales: parciales, minEnVano: minEnVano, nivel: nivel,
     viasTramo: viasTramo, vanosTV: vanosTV, segmentos: segmentos, segDeVano: segDeVano, nombreSeg: nombreSeg, cantonesDe: cantonesDe,
     vanosCanton: vanosCanton, segsDeVanos: segsDeVanos, resumen: resumen, secDe: secDe, secTxt: secTxt, medsZona: medsZona, estacionesEn: estacionesEn,
     rutaTramo: rutaTramo, rutaSeg: rutaSeg, rutaCanton: rutaCanton, rutaCantonDeVano: rutaCantonDeVano,
@@ -1965,6 +1976,8 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
  * c38 (22/10/2026): línea violeta «TN» en cada tramo neutro de la planilla (aislador entre fases distintas: punto
  *   donde el pantógrafo puede dar un golpe) y franja verde azulada «170→110» donde los datos muestran el cambio de
  *   sección del hilo (tabla cambio_seccion, script 09; «?» = a confirmar en campo).
+ * c39 (23/10/2026): muestra solo VÍA PRINCIPAL (dentro de los límites de cada tramo, script 11): el rango se recorta a los
+ *   vanos de vía principal y los vanos de cuadro no se dibujan. o.conFuera = true (ficha de un vano de cuadro) muestra todo.
  * ===================================================================== */
 (function (global) {
   'use strict';
@@ -1984,7 +1997,12 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
     var sel = {}; meds.slice(0, o.elegidas || 2).forEach(function (m) { sel[m.id] = 1; });
     var col = {}; meds.forEach(function (m, i) { col[m.id] = MCOL[i % MCOL.length]; });
     var SER = {}, falla = {};
-    var todos = (M.RV[o.rec + '|' + o.via] || []).filter(function (v) { return v.kf > o.ki - 1e-6 && v.ki < o.kf + 1e-6; });
+    var todos = (M.RV[o.rec + '|' + o.via] || []).filter(function (v) { return v.kf > o.ki - 1e-6 && v.ki < o.kf + 1e-6 && (o.conFuera || !v.fuera); });
+    if (!o.conFuera && todos.length) {   // c39: el rango no sale de vía principal
+      var pa = todos.filter(function (v) { return v.kf > o.ki + 1e-6; })[0], pb = todos.filter(function (v) { return v.ki < o.kf - 1e-6; }).pop();
+      if (pa && pb) o = Object.assign({}, o, { ki: Math.max(o.ki, pa.ki), kf: Math.min(o.kf, pb.kf) });
+      todos = todos.filter(function (v) { return v.kf > o.ki - 1e-6 && v.ki < o.kf + 1e-6; });
+    }
     var est = (M.EST[o.rec + '|' + o.via] || []);
     var CAL = Mo.calibreEn ? Mo.calibreEn(M, o.rec, o.via, o.ki - 0.5, o.kf + 0.5) : [], verCal = true;
     var TNS = Mo.neutrosEn ? Mo.neutrosEn(M, o.rec, o.via, o.ki - 0.5, o.kf + 0.5) : [];        // c38
@@ -4122,7 +4140,7 @@ if (typeof module !== "undefined") module.exports = { elegirRecorrido: elegirRec
     var via = UI.viaDesdeRuta(ctx.params.via), cod = ctx.params.piquete, hasta = ctx.query.hasta || null;
     if (!UI.viaValida(via)) return Pantallas.noEncontrada(ctx, '«' + ctx.params.via + '» no es una vía.');
     var M = await modelo(ctx); if (!M) return;
-    var cand = M.V.filter(function (v) { return v.via === via && v.piquete_desde === cod && (!hasta || v.piquete_hasta === hasta); });
+    var cand = M.TODOS.filter(function (v) { return v.via === via && v.piquete_desde === cod && (!hasta || v.piquete_hasta === hasta); });   // c39: también los de cuadro
     if (cand.length > 1) cand = cand.filter(function (v) { return v.tramo === Number(String(cod).split('-')[0]); });
     var v = cand[0];
     if (!v) return Pantallas.noEncontrada(ctx, 'En la planilla vigente no hay un vano que arranque en el piquete ' + cod + ' (' + UI.nombreVia(via) + ')' + (hasta ? ' y llegue a ' + hasta : '') + '.');
@@ -4153,7 +4171,7 @@ if (typeof module !== "undefined") module.exports = { elegirRecorrido: elegirRec
     var hoyTxt = UI.fecha(UI.hoyISO());
     var a = vs[0].ki, bkm = vs[vs.length - 1].kf;
     if (esVano) { var all = M.RV[v.recorrido + '|' + v.via]; a = all[Math.max(0, v.i - 2)].ki; bkm = all[Math.min(all.length - 1, v.i + 2)].kf; }
-    var curvaInf = Grafico.crear({ M: M, rec: vs[0].recorrido, via: vs[0].via, ki: a, kf: bkm, sec: sec, resaltar: esVano ? [v.ki, v.kf] : null, sinLeyenda: true });   // s42: sin ayuda ni leyenda en el informe
+    var curvaInf = Grafico.crear({ M: M, rec: vs[0].recorrido, via: vs[0].via, ki: a, kf: bkm, sec: sec, resaltar: esVano ? [v.ki, v.kf] : null, sinLeyenda: true, conFuera: esVano && v.fuera });   // s42: sin ayuda ni leyenda en el informe
     function armarHoja() {
       var hijos = [h('div', { class: 'rd-encab' }, h('span', null, 'Catenaria · Línea Roca · Desgaste del hilo de contacto'), h('span', null, 'Emitido el ' + hoyTxt + (emiteTxt() ? ' · ' + emiteTxt() : ''))),
         h('h2', { class: 'rd-h1' }, motivoN() + ' · ' + o.nom),
@@ -5154,6 +5172,7 @@ if (typeof module !== "undefined") module.exports = { elegirRecorrido: elegirRec
       seg ? [h('dt', null, 'Entre estaciones'), h('dd', null, h('a', { href: Modelo.rutaSeg(seg) }, tec ? seg.nombre : seg.nombre.replace(/\*/g, '')))] : null,
       h('dt', null, 'Cantón'), h('dd', null, canton ? h('a', { href: Modelo.rutaCantonDeVano(M, mv) }, 'Cantón ' + canton.numero) : [h('span', { class: 'nota' }, 'sin cantón en la planilla (s08)'), mv && seg ? [' · ', h('a', { href: Modelo.rutaCantonDeVano(M, mv) }, 'vanos sin cantón')] : null]),
       h('dt', null, 'Piquetes'), h('dd', { class: 'mono' }, vn.piquete_desde + ' → ' + vn.piquete_hasta),
+      mv && mv.fuera ? [h('dt', null, 'Vía principal'), h('dd', null, h('b', null, 'No'), ' · cuadro de estación o unión entre tramos, fuera de los límites del tramo. No entra en los conteos ni en el gráfico del tramo.')] : null,
       h('dt', null, 'Progresiva'), h('dd', null, UI.km(vn.km_inicio) + ' a ' + UI.num(vn.km_fin, 3) + (vn.largo_m != null ? ' · ' + UI.num(vn.largo_m, 1) + ' m' : '')),
       !seg && estTxt ? [h('dt', null, 'Entre'), h('dd', null, estTxt)] : null,
       h('dt', null, 'Sección'), h('dd', null, sec ? sec + ' mm²' : 'sin medición válida'),
@@ -5164,7 +5183,8 @@ if (typeof module !== "undefined") module.exports = { elegirRecorrido: elegirRec
     var desde = +ventana[0].km_inicio, hasta = +ventana[ventana.length - 1].km_fin;
     if (!M) return UI.card('Curva del vano y sus vecinos', null, UI.mensaje('error', 'No se pudo leer el estado de la red para dibujar la curva. Recargá la página.'));
     return UI.card('Curva del vano y sus vecinos', tec ? VECINOS + ' vanos a cada lado' : null,
-      Grafico.crear({ M: M, rec: vn.recorrido, via: vn.via, ki: desde, kf: hasta, sec: sec, resaltar: [+vn.km_inicio, +vn.km_fin], textoResaltar: 'este vano', sinLeyenda: !tec }));
+      Grafico.crear({ M: M, rec: vn.recorrido, via: vn.via, ki: desde, kf: hasta, sec: sec, resaltar: [+vn.km_inicio, +vn.km_fin], textoResaltar: 'este vano', sinLeyenda: !tec,
+                     conFuera: !!(M.VID[vn.id] && M.VID[vn.id].fuera) }));   // c39: un vano de cuadro se ve con sus vecinos
   }
 
   function bloqueHistorial(e, hist, meds, versiones, parciales, perfil, tec) {
@@ -5961,7 +5981,11 @@ if (typeof module !== "undefined") module.exports = { elegirRecorrido: elegirRec
       porFin = true;
     }
     if (!r.datos.length) {
-      msg.replaceChildren(UI.mensaje('error', 'El piquete ' + cod + ' no está en la planilla vigente' + (via ? ' en la ' + UI.nombreVia(via).toLowerCase() : '') + '. Revisá el código (tramo-km-número).'));
+      // c17: ¿es un código de una planilla anterior? (equivalencia_piquete, script 10). Sin el script, sigue como antes.
+      var eq = await Conexion.leer('equivalencia_piquete', { columnas: 'via, codigo_antes, codigo_nuevo', filtros: [['eq', 'codigo_antes', cod]].concat(via ? [['eq', 'via', via]] : []) });
+      var nuevos = eq.error ? [] : uniq(eq.datos.map(function (x) { return x.codigo_nuevo; }));
+      msg.replaceChildren(UI.mensaje('error', 'El piquete ' + cod + ' no está en la planilla vigente' + (via ? ' en la ' + UI.nombreVia(via).toLowerCase() : '') + '. ' +
+        (nuevos.length ? 'Con la planilla nueva ese poste se llama ' + nuevos.join(' / ') + ': buscalo con ese código.' : 'Revisá el código (tramo-km-número).')));
       return;
     }
     var vias = uniq(r.datos.map(function (x) { return x.via; }));
@@ -6616,7 +6640,8 @@ if (typeof module !== "undefined") module.exports = { elegirRecorrido: elegirRec
     vigentes: { t: '⚑ Datos a confirmar que definen el estado hoy', d: 'sin revisar, en la medición que hoy define el estado del vano (son los que la jefatura ve en «Para verificar en campo»)' },
     pendientes: { t: 'Todas sin revisar', d: 'incluye mediciones anteriores (historial)' },
     clasificadas: { t: 'Ya clasificadas', d: 'reales y dato erróneo' },
-    todas: { t: 'Todas', d: '' }
+    todas: { t: 'Todas', d: '' },
+    fuera: { t: 'Fuera de vía principal', d: 'lecturas en cuadros de estación y uniones entre tramos (fuera de los límites de cada tramo, c39): no cuentan en los pendientes ni en la Red; se pueden clasificar igual' }
   };
   var CLAS = { sin_revisar: 'Sin revisar', real: 'Real', dato_erroneo: 'Dato erróneo', verificada_campo: 'Verificada en campo' };   // c29
   var NOTAS_ERRONEO = ['Cruce de vía: el Geismar pierde la referencia.', 'Tierra o suciedad en la vía: pierde la referencia.', 'Paso a nivel.', 'Aparato de vía (cambio).'];
@@ -6656,6 +6681,7 @@ if (typeof module !== "undefined") module.exports = { elegirRecorrido: elegirRec
 
   function filtrar(lect, q) {
     return lect.filter(function (r) {
+      if ((q.ver === 'fuera') !== (r.via_principal === false)) return false;   // c39: lo de afuera solo en «Fuera de vía principal»
       if (q.ver === 'vigentes' && !(r.clasificacion === 'sin_revisar' && r.define_vigente)) return false;
       if (q.ver === 'pendientes' && r.clasificacion !== 'sin_revisar') return false;
       if (q.ver === 'clasificadas' && r.clasificacion === 'sin_revisar') return false;
@@ -6702,7 +6728,9 @@ if (typeof module !== "undefined") module.exports = { elegirRecorrido: elegirRec
     var r = await leerLecturas();
     if (!ctx.vigente()) return null;
     if (r.error) { Pantallas.errorBase(ctx, r.error); return null; }
-    var lect = r.datos, q = normalizarQuery(ctx, lect), lista = filtrar(lect, q);
+    var q = normalizarQuery(ctx, r.datos), lista = filtrar(r.datos, q);
+    var fuera = r.datos.filter(function (x) { return x.via_principal === false; });   // c39: no cuentan
+    var lect = r.datos.filter(function (x) { return x.via_principal !== false; });
     var sinRev = lect.filter(function (x) { return x.clasificacion === 'sin_revisar'; });
     var nAlerta = sinRev.filter(enAlerta).length;
     var nReal = lect.filter(function (x) { return x.clasificacion === 'real'; }).length, nErr = lect.filter(function (x) { return x.clasificacion === 'dato_erroneo'; }).length;
@@ -6715,12 +6743,13 @@ if (typeof module !== "undefined") module.exports = { elegirRecorrido: elegirRec
         kpi('Sin revisar (todas)', pend.lecturas, 'incluye mediciones anteriores', '', 'pendientes'),
         kpi('En alerta o crítico', nAlerta, 'sin revisar · se clasifican de a una', nAlerta ? 'alerta' : '', 'pendientes'),
         kpi('Reales', nReal, null, '', 'clasificadas'),
-        kpi('Dato erróneo', nErr, 'descartadas: el vano muestra un cartel', '', 'clasificadas')),
+        kpi('Dato erróneo', nErr, 'descartadas: el vano muestra un cartel', '', 'clasificadas'),
+        fuera.length ? kpi('Fuera de vía principal', fuera.filter(function (x) { return x.clasificacion === 'sin_revisar'; }).length, 'sin revisar en cuadros y uniones · no cuentan', '', 'fuera') : null),
       h('p', { class: 'nota', style: 'margin:10px 0 0' }, 'Una lectura aislada (caída brusca o punto suelto) cuenta para el estado hasta que un operador la clasifica. ',
         h('b', null, 'Real'), ': sigue contando y se quita el ⚑. ', h('b', null, 'Dato erróneo'), ': el estado se calcula sin ella, con nota obligatoria, y el vano muestra «se descartó una lectura… revisar con el personal de catenaria». ',
         'Todo se puede deshacer y queda registrado quién y cuándo.'));
 
-    var filtros = bloqueFiltros(lect, q);
+    var filtros = bloqueFiltros(r.datos, q);
     var sel = {};    // ids elegidos para el lote
     var tbody = h('tbody'), barra = h('div', { class: 'lote', hidden: true, role: 'region', 'aria-label': 'Clasificar en lote' });
     var todas = h('input', { type: 'checkbox', 'aria-label': 'Elegir todas las sin revisar de la lista' });
@@ -7324,7 +7353,14 @@ if (typeof module !== "undefined") module.exports = { elegirRecorrido: elegirRec
         'Las líneas punteadas son la alerta y el límite. La franja de abajo es el estado actual de cada vano.',
         'Tocá la franja o un piquete para abrir ese vano; la franja de cantones abre el cantón.',
         'Línea violeta «TN»: tramo neutro de la planilla (aislador entre fases distintas). Ahí el pantógrafo puede dar un golpe: mirá si la curva cae justo en ese punto.',
-        'Línea verde azulada «170→110»: dónde cambia la sección del hilo según los datos. Con «?» todavía no está confirmado en campo; la altura de un hilo de 170 medido como 110 sale baja.'],
+        'Línea verde azulada «170→110»: dónde cambia la sección del hilo según los datos. Con «?» todavía no está confirmado en campo; la altura de un hilo de 170 medido como 110 sale baja.',
+        'El gráfico de un tramo muestra solo la vía principal, entre el primer y el último piquete del tramo.'],
+        ir: null },
+      { id: 'principal', para: 'todos', q: '¿Por qué no aparecen los cuadros de estación?', pasos: [
+        'El Geismar mide solo la vía principal. Cada tramo tiene un piquete de inicio y uno de fin (por ejemplo, el tramo 9 va de 9-18-17 a 9-38-29 en la vía ascendente).',
+        'Lo que queda afuera son los cuadros de estación (Constitución, Temperley), las puntas (Ezeiza, Korn, Bosques, La Plata) y las uniones entre tramos: unos 360 vanos.',
+        'Esos vanos no entran en la Red, los listados ni los pendientes de Revisión, y no se dibujan en el gráfico del tramo.',
+        'Si buscás uno por su piquete, igual se abre su ficha, que dice «Vía principal: No». Sus lecturas dudosas están en Revisión → «Fuera de vía principal».'],
         ir: null },
       { id: 'cuenta', para: 'todos', q: '¿Cómo cambio mi contraseña o salgo?', pasos: [
         'Tocá tu nombre, arriba a la derecha (en el celular: Más → Mi cuenta).',
@@ -7725,7 +7761,7 @@ if (typeof module !== "undefined") module.exports = { elegirRecorrido: elegirRec
     var M = r.M, foco, back, nom, miga;
     if (ctx.params.piquete) {
       var via = UI.viaDesdeRuta(ctx.params.via), cod = ctx.params.piquete, hasta = ctx.query.hasta || null;
-      var cand = M.V.filter(function (v) { return v.via === via && v.piquete_desde === cod && (!hasta || v.piquete_hasta === hasta); });
+      var cand = M.TODOS.filter(function (v) { return v.via === via && v.piquete_desde === cod && (!hasta || v.piquete_hasta === hasta); });   // c39: también los de cuadro
       if (cand.length > 1) cand = cand.filter(function (v) { return v.tramo === Number(String(cod).split('-')[0]); });
       if (!cand[0]) { Pantallas.noEncontrada(ctx, 'En la planilla vigente no hay un vano que arranque en el piquete ' + cod + ' (' + UI.nombreVia(via || '') + ').'); return null; }
       var v = cand[0]; foco = [v]; back = T().rutaVano(v); nom = 'Vano ' + v.piquete_desde + ' – ' + v.piquete_hasta;
@@ -7835,7 +7871,7 @@ if (typeof module !== "undefined") module.exports = { elegirRecorrido: elegirRec
     var inObs = h('textarea', { id: 'vf-obs', placeholder: 'Ej.: multilecturas cada 5 m; se verificó el punto bajo de la medición del Geismar.' });
     var cuerpo = h('tbody'), estadoLect = h('p', { class: 'nota', role: 'status' });
     var res = h('div', { class: 'cf-res' }), btRevisar = h('button', { class: 'btn', type: 'button' }, 'Revisar antes de guardar');
-    var grafico = Grafico.crear({ M: C.M, rec: C.rec, via: C.via, ki: C.vs[0].ki, kf: C.vs[C.vs.length - 1].kf, sec: C.foco[0].seccion, resaltar: [C.foco[0].ki, C.foco[C.foco.length - 1].kf], textoResaltar: C.nom.toLowerCase(), sinLeyenda: !ctx.tec });
+    var grafico = Grafico.crear({ M: C.M, rec: C.rec, via: C.via, ki: C.vs[0].ki, kf: C.vs[C.vs.length - 1].kf, sec: C.foco[0].seccion, resaltar: [C.foco[0].ki, C.foco[C.foco.length - 1].kf], textoResaltar: C.nom.toLowerCase(), sinLeyenda: !ctx.tec, conFuera: C.foco.some(function (v) { return v.fuera; }) });
 
     function fila(l) {
       var sp = selPiquete(C.pqs, l.cod, null), im = h('input', { inputmode: 'decimal', value: l.m == null ? '' : String(l.m).replace('.', ','), 'aria-label': 'Metros desde el piquete' }),
@@ -8184,7 +8220,7 @@ if (typeof module !== "undefined") module.exports = { elegirRecorrido: elegirRec
         T().td('Altura', h('b', null, mm(l.valor_mm) + ' mm'), 'num'), T().td('Estado', nv && nv !== 'normal' ? UI.chipEstado(nv) : null, 'notas'));
     });
     var foco = vv.map(function (y) { return M.VID[y.vano_id]; }).filter(Boolean).sort(function (a, b) { return a.ki - b.ki; });
-    var graf = foco.length ? Grafico.crear({ M: M, rec: x.recorrido, via: x.via, ki: Math.min(foco[0].ki, +x.km_desde) - 0.01, kf: Math.max(foco[foco.length - 1].kf, +x.km_hasta) + 0.01, sec: foco[0].seccion, sector: [+x.km_desde, +x.km_hasta], sinLeyenda: !ctx.tec }) : null;
+    var graf = foco.length ? Grafico.crear({ M: M, rec: x.recorrido, via: x.via, ki: Math.min(foco[0].ki, +x.km_desde) - 0.01, kf: Math.max(foco[foco.length - 1].kf, +x.km_hasta) + 0.01, sec: foco[0].seccion, sector: [+x.km_desde, +x.km_hasta], sinLeyenda: !ctx.tec, conFuera: foco.some(function (v) { return v.fuera; }) }) : null;
     ctx.el.replaceChildren(
       cabDet(x, 'Verificación con calibre N° ' + x.id),
       x.estado === 'anulada' ? UI.mensaje('error', 'Anulada: no cuenta para el estado de los vanos.') : null,
