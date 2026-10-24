@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="robots" content="noindex, nofollow">
 <meta name="theme-color" content="#ffffff">
-<!-- c38 · Versión en un solo archivo de index.html. El original va en carpetas: ver claude/app/ -->
+<!-- c40 · Versión en un solo archivo de index.html. El original va en carpetas: ver claude/app/ -->
 <title>Desgaste de catenaria · Línea Roca</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700&family=Roboto+Mono:wght@400;500&display=swap">
@@ -462,7 +462,7 @@ table.rd-t { border-collapse: collapse; width: 100%; font-size: 13.5px; font-var
 .rd-esq { display: block; width: 100%; min-width: 1000px; height: auto; font-family: var(--font); }
 .rd-esq-lbl { font-size: 11.5px; fill: var(--fg); }
 .rd-esq-lbl.mayor { font-weight: 600; font-size: 13px; }
-.rd-esq-lbl.cab { font-weight: 700; font-size: 20px; }
+.rd-esq-lbl.cab { font-weight: 600; font-size: 13px; }   /* c40: mismo tamaño que las otras estaciones en negrita */
 .rd-esq-lbl.ne { fill: var(--muted); }
 .rd-esq-num { font-family: var(--mono); font-size: 11px; font-weight: 500; }
 .rd-esq-hit { fill: none; stroke: transparent; stroke-width: 22; stroke-linecap: round; cursor: pointer; }
@@ -820,7 +820,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
     var tabla = {
       consultar: true,
       usuario: !!rol,                                           // cualquier usuario con perfil activo (c31)
-      informar: rol === 'admin' || rol === 'operador' || (rol === 'gestion' && (s.cargo === 'coordinacion' || s.cargo === 'jefe_base')),   // c29: asistentes solo ven
+      informar: rol === 'admin' || rol === 'operador',          // c40 (orden de la Coordinación, 23/10/2026): Análisis y gestión solo consulta
       cargar: rol === 'operador' || rol === 'admin',
       clasificar: rol === 'operador' || rol === 'admin',
       anular: rol === 'operador' || rol === 'admin',
@@ -1986,7 +1986,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
   function nf(v, d) { return UI.num(v, d); }
   function mm(v) { return v == null ? '—' : UI.num(v, 2); }
   function km(v) { return v == null ? '—' : 'km ' + UI.num(v, 3); }
-  function esc(t) { return String(t).replace(/&/g, '&amp;').replace(/</g, '&lt;'); }
+  function esc(t) { return String(t).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'); }   // c40: también > y comillas
   var nGraf = 0;
 
   function crear(o) {
@@ -3754,7 +3754,7 @@ if (typeof module !== "undefined") module.exports = { elegirRecorrido: elegirRec
         var nom = s[0], x = s[1], y = s[2], m = s[3], mayor = ESQ_MAJOR[nom], cab = m === 'cab';
         var c = n('circle', { cx: x, cy: y, r: cab ? 9 : mayor ? 7 : 4.6, fill: '#d7ecf6', 'stroke-width': 2.4, 'pointer-events': 'none' }, gS); c._r = r;
         var t;
-        if (cab) { t = n('text', { class: 'rd-esq-lbl cab', x: x - 16, y: y - 2, 'text-anchor': 'end' }, gS); var a1 = n('tspan', { x: x - 16, dy: 0 }, t); a1.textContent = 'Plaza'; var a2 = n('tspan', { x: x - 16, dy: 21 }, t); a2.textContent = 'Constitución'; }
+        if (cab) { t = n('text', { class: 'rd-esq-lbl cab', x: x - 16, y: y - 3, 'text-anchor': 'end' }, gS); var a1 = n('tspan', { x: x - 16, dy: 0 }, t); a1.textContent = 'Plaza'; var a2 = n('tspan', { x: x - 16, dy: 15 }, t); a2.textContent = 'Constitución'; }
         else if (m === 'u') t = n('text', { class: 'rd-esq-lbl', x: x + 3, y: y - 11, transform: 'rotate(-38 ' + (x + 3) + ' ' + (y - 11) + ')' }, gS);
         else if (m === 'dl') t = n('text', { class: 'rd-esq-lbl', x: x - 2, y: y + 16, 'text-anchor': 'end', transform: 'rotate(-38 ' + (x - 2) + ' ' + (y + 16) + ')' }, gS);
         else if (m === 'r') t = n('text', { class: 'rd-esq-lbl', x: x + 10, y: y + 4 }, gS);
@@ -7260,7 +7260,7 @@ if (typeof module !== "undefined") module.exports = { elegirRecorrido: elegirRec
  * Organizada por PREGUNTAS (no por pantallas), cada una con 3–4 pasos y botón «Ir».
  * Según el perfil: Análisis y gestión ve lo suyo; operadores suman Revisión y Mediciones;
  * administradores suman Usuarios. c29 (18/10): verificación con calibre e intervenciones (para quien informa:
- * Coordinación, jefes de base, operadores y administradores) y «En campo» (todos). Se lee en 2 minutos desde el celular.
+ * operadores y administradores; c40) y «En campo» (todos). Se lee en 2 minutos desde el celular.
  * Los umbrales salen de la base (ctx.ref().perfiles), no del código.
  * REGLA (cambios_c05.md): cada cambio de pantalla revisa también esta ayuda.
  * ===================================================================== */
@@ -7297,7 +7297,7 @@ if (typeof module !== "undefined") module.exports = { elegirRecorrido: elegirRec
         '«Dato a confirmar»: una sola lectura dio un valor bajo y nadie confirmó todavía si es real o un error del equipo. Mientras tanto cuenta como real.',
         '«Medido solo en parte»: el equipo leyó menos de la mitad del vano y lo leído da alerta o crítico. No cambia el estado, pero conviene mirarlo.',
         'La lista incluye lecturas aisladas que todavía nadie revisó: no todo lo que aparece es un problema.',
-        'Coordinación y jefes de base: cuando la guardia mide con calibre, cargalo en la app (ver «¿Cómo cargo una verificación con calibre?»). Así el vano se actualiza y el ⚑ se cierra.'],
+        'Cuando la guardia mide con calibre, pasale las lecturas a un operador para que las cargue. Así el vano se actualiza y el ⚑ se cierra.'],
         ir: ['#/listados/verificar', 'Ir a Para verificar'] },
       { id: 'calibre', para: 'informa', q: '¿Cómo cargo una verificación con calibre?', pasos: [
         'Entrá a la ficha del vano (o a la pantalla del cantón) y tocá «Informar verificación».',
@@ -7320,7 +7320,7 @@ if (typeof module !== "undefined") module.exports = { elegirRecorrido: elegirRec
         'La marca se va con la próxima medición del Geismar o con una verificación con calibre del hilo nuevo.'],
         ir: null },
       { id: 'campo', para: 'todos', q: '¿Qué es «En campo»?', pasos: [
-        'Es la lista de verificaciones con calibre e intervenciones que cargaron Coordinación, los jefes de base y los operadores, con quién y cuándo.',
+        'Es la lista de verificaciones con calibre e intervenciones que cargaron los operadores y administradores, con quién y cuándo.',
         'Tocá una para ver las lecturas, cómo quedó cada vano y el gráfico.',
         'En la ficha de cada vano, «En campo» muestra lo que se cargó en ese vano.'],
         ir: ['#/campo', 'Ir a En campo'] },
@@ -7458,7 +7458,7 @@ if (typeof module !== "undefined") module.exports = { elegirRecorrido: elegirRec
     ctx.el.replaceChildren(
       UI.encabezado('Ayuda', 'Tocá una pregunta para ver los pasos.'),
       UI.card(null, null, h('div', { class: 'ay-lista' }, generales)),
-      campo.length ? UI.card('Para informar en campo', 'Coordinación, jefes de base y operadores', h('div', { class: 'ay-lista' }, campo)) : null,
+      campo.length ? UI.card('Para informar en campo', 'Operadores y administradores', h('div', { class: 'ay-lista' }, campo)) : null,
       tecnicas.length ? UI.card(ctx.tec && !adm ? 'Para operadores' : 'Para operadores y administradores', null, h('div', { class: 'ay-lista' }, tecnicas)) : null,
       bloqueSugerencia(ctx),
       h('p', { class: 'nota ay-pie' }, 'Datos: mediciones del Geismar 201 y verificaciones en campo con calibre. Cada vano muestra el dato válido más nuevo de los dos.'));
@@ -7546,7 +7546,7 @@ if (typeof module !== "undefined") module.exports = { elegirRecorrido: elegirRec
       var cargo = h('select', { id: 'us-cargo' }, opciones(CARGO, u ? u.cargo : '', 'Elegí el cargo'));
       var base = h('select', { id: 'us-base' }, [h('option', { value: '' }, 'Sin base')].concat(BASES.map(function (b) { return h('option', { value: b, selected: u && u.base === b ? true : null }, b); })));
       var campoCargo = h('div', { class: 'campo' }, h('label', { for: 'us-cargo' }, 'Cargo'), cargo,
-        h('small', { class: 'nota' }, 'Coordinación y jefes de base podrán informar verificaciones e intervenciones; los asistentes técnicos solo ven.'));
+        h('small', { class: 'nota' }, 'Análisis y gestión solo consulta: no carga ni valida datos (Coordinación, 23/10/2026).'));
       function verCargo() { campoCargo.hidden = perfil.value !== 'gestion'; }
       perfil.addEventListener('change', verCargo); verCargo();
       var guardar = h('button', { class: 'btn', type: 'submit' }, esAlta ? 'Dar de alta' : 'Guardar cambios');
@@ -7557,7 +7557,7 @@ if (typeof module !== "undefined") module.exports = { elegirRecorrido: elegirRec
           esAlta ? null : h('small', { class: 'nota' }, 'Es con lo que ingresa. Si lo corregís, avisale: la contraseña no cambia.')),
         h('div', { class: 'campo' }, h('label', { for: 'us-nombre' }, 'Nombre y apellido'), nombre),
         h('div', { class: 'campo' }, h('label', { for: 'us-perfil' }, 'Perfil'), perfil,
-          h('small', { class: 'nota' }, 'Administrador: todo, más usuarios. Operador: grupo Geismar (carga, mediciones, revisión). Análisis y gestión: Coordinación, jefes de base y asistentes técnicos.')),
+          h('small', { class: 'nota' }, 'Administrador: todo, más usuarios. Operador: grupo Geismar (carga, mediciones, revisión). Análisis y gestión: Coordinación, jefes de base y asistentes técnicos; solo consultan (no cargan ni validan datos).')),
         campoCargo,
         h('div', { class: 'campo' }, h('label', { for: 'us-base' }, 'Base (optativa)'), base, h('small', { class: 'nota' }, 'Para ver «mi zona». No limita lo que puede hacer.')),
         msg, h('div', { class: 'acciones' }, guardar, cancelar));
@@ -7726,7 +7726,7 @@ if (typeof module !== "undefined") module.exports = { elegirRecorrido: elegirRec
  *   Listado                 #/campo[?tipo=&tramo=&ver=]
  *   Detalle                 #/campo/verificacion/<id>   #/campo/intervencion/<id>
  *
- * Quién informa: Administrador, Operador, y en Análisis y gestión Coordinación y jefes de base (los asistentes técnicos ven).
+ * Quién informa: Administrador y Operador. c40 (orden de la Coordinación, 23/10/2026): Análisis y gestión (Coordinación, jefes de base, asistentes) solo consulta.
  * La regla la aplica la base (script 08): por vano, valor nuevo = mínimo entre las lecturas del calibre del sector y lo del
  * Geismar FUERA del sector. La base guarda solo el mínimo de todo el vano: cuando ese mínimo cae dentro del sector, la app
  * calcula desde la serie (0,5 m) el mínimo de afuera y lo manda; la base controla que no sea menor que el del vano.
@@ -7795,7 +7795,7 @@ if (typeof module !== "undefined") module.exports = { elegirRecorrido: elegirRec
     return h('div', { class: 'rd-aviso' }, h('b', null, 'Estás informando en la zona de la Base ' + b + ' '), '(tu base es ' + mia + '). Se puede, por ejemplo para cubrir a otro jefe de base; queda registrado que lo cargaste vos.');
   }
   function sinPermiso(ctx) {
-    ctx.el.replaceChildren(UI.encabezado('Sin permiso'), UI.mensaje('info', 'Las verificaciones y las intervenciones las informan Coordinación, los jefes de base, los operadores y los administradores. Con tu perfil podés ver lo que se cargó en «En campo».'),
+    ctx.el.replaceChildren(UI.encabezado('Sin permiso'), UI.mensaje('info', 'Las verificaciones y las intervenciones las cargan los operadores y los administradores (Coordinación, 23/10/2026). Con tu perfil podés ver lo que se cargó en «En campo».'),
       h('p', null, h('a', { class: 'btn sec chico', href: '#/campo' }, 'Ir a En campo')));
   }
 
@@ -8074,7 +8074,7 @@ if (typeof module !== "undefined") module.exports = { elegirRecorrido: elegirRec
   async function pLista(ctx) {
     ctx.miga([{ texto: 'En campo' }]);
     var adm = Conexion.puede(ctx.sesion, 'administrar'), q = ctx.query;
-    ctx.el.replaceChildren(UI.encabezado('En campo', 'Verificaciones con calibre e intervenciones informadas por Coordinación, jefes de base y operadores.'), h('div', { class: 'cargando' }, 'Leyendo…'));
+    ctx.el.replaceChildren(UI.encabezado('En campo', 'Verificaciones con calibre e intervenciones informadas por operadores y administradores.'), h('div', { class: 'cargando' }, 'Leyendo…'));
     var r = await Conexion.leer('v_campo', { orden: ['cargo_en', false], limite: 1000 });
     if (!ctx.vigente()) return;
     if (r.error) return Pantallas.errorBase(ctx, /v_campo|does not exist|relation/i.test(r.error) ? 'Falta correr en Supabase el script 08 (base/08_campo.sql).' : r.error);
@@ -8122,7 +8122,7 @@ if (typeof module !== "undefined") module.exports = { elegirRecorrido: elegirRec
       });
     }
     ctx.el.replaceChildren(
-      UI.encabezado('En campo', 'Verificaciones con calibre e intervenciones informadas por Coordinación, jefes de base y operadores.'),
+      UI.encabezado('En campo', 'Verificaciones con calibre e intervenciones informadas por operadores y administradores.'),
       h('div', { class: 'selects acciones' }, sT, sTr, sV, Ayuda.boton('campo', 'Ayuda: En campo')),
       adm && sinVer.length ? h('div', { class: 'rd-aviso' }, h('b', null, UI.plural(sinVer.length, 'registro', 'registros') + ' sin ver por un administrador. '), 'Revisá en especial los que cambian el estado de un vano.') : null,
       UI.card(null, null, lista.length ? T().tabla([{ t: 'Fecha' }, { t: 'Qué' }, { t: 'Dónde' }, { t: 'Resultado' }, { t: 'Cargó' }, { t: 'Estado' }], filas, 'cf-lista')
