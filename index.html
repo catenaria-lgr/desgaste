@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="robots" content="noindex, nofollow">
 <meta name="theme-color" content="#ffffff">
-<!-- c40 · Versión en un solo archivo de index.html. El original va en carpetas: ver claude/app/ -->
+<!-- c43 · Versión en un solo archivo de index.html. El original va en carpetas: ver claude/app/ -->
 <title>Desgaste de catenaria · Línea Roca</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700&family=Roboto+Mono:wght@400;500&display=swap">
@@ -593,6 +593,9 @@ table.rd-t { border-collapse: collapse; width: 100%; font-size: 13.5px; font-var
 
 /* c38: carteles del gráfico sobre tramo neutro y cambio de sección */
 .rd-tip-tn { color: #6a1b9a; font-weight: 500; }
+.rd-tip-min { font-weight: 500; }   /* c45 */
+.rd-tip .rd-peq { white-space: normal; max-width: 290px; }   /* c45: la aclaración larga se parte en el celular */
+.rd-leyenda .rd-tri { color: #d99100; font-size: 11px; margin-right: 3px; }
 .rd-tip-sec { color: #00695c; }
 </style>
 <script>
@@ -781,6 +784,24 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
     return { error: r.error ? traducirError(r.error) : null };
   }
 
+  // c43 (23/10/2026): recuperar la contraseña con un CÓDIGO por mail (el correo institucional borra los links, no los números).
+  // Supabase manda el código con la plantilla «Reset Password» ({{ .Token }}); acá se verifica y se pone la contraseña nueva.
+  async function pedirCodigo(mail) {
+    var r = await cliente.auth.resetPasswordForEmail(String(mail).trim());
+    return { error: r.error ? traducirError(r.error) : null };
+  }
+  async function restablecerConCodigo(mail, codigo, nueva) {
+    var v = await cliente.auth.verifyOtp({ email: String(mail).trim(), token: String(codigo).replace(/\s/g, ''), type: 'recovery' });
+    _perfilCache = null;
+    if (v.error) return { error: /expired|invalid|otp|token/i.test((v.error.message || '') + (v.error.code || '')) ? 'El código no es válido o ya venció. Pedí uno nuevo.' : traducirError(v.error) };
+    var u = await cliente.auth.updateUser({ password: nueva });
+    if (u.error) { await cliente.auth.signOut(); _perfilCache = null; return { error: traducirError(u.error) + ' Pedí un código nuevo y probá con otra contraseña.' }; }
+    var s = await sesion();
+    if (!s || !s.rol) { await cliente.auth.signOut(); _perfilCache = null; return { error: s && s.inactivo ? 'Usuario dado de baja. Consultá con el administrador.' : 'El usuario existe pero no tiene perfil asignado. Consultá con el administrador.' }; }
+    if (s.debeCambiar) await claveCambiada();   // si tenía una provisoria, ya eligió una propia
+    return { sesion: s };
+  }
+
   // c11 (15/10): gestión de usuarios por la función de Supabase «admin-usuarios» (solo administradores)
   async function adminUsuarios(accion, datos) {
     try {
@@ -967,7 +988,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
     cliente: cliente,
     url: SUPABASE_URL,
     adminUsuarios: adminUsuarios, claveCambiada: claveCambiada, sesion: sesion, ingresar: ingresar, salir: salir,
-    recuperarClave: recuperarClave, cambiarClave: cambiarClave, alCambiarSesion: alCambiarSesion,
+    recuperarClave: recuperarClave, pedirCodigo: pedirCodigo, restablecerConCodigo: restablecerConCodigo, cambiarClave: cambiarClave, alCambiarSesion: alCambiarSesion,
     puede: puede,
     leer: leer, leerTodo: leerTodo, rpc: rpc, referencia: referencia, estadoPorMinimo: estadoPorMinimo,
     diagnostico: diagnostico, traducirError: traducirError
@@ -1978,6 +1999,9 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
  *   sección del hilo (tabla cambio_seccion, script 09; «?» = a confirmar en campo).
  * c39 (23/10/2026): muestra solo VÍA PRINCIPAL (dentro de los límites de cada tramo, script 11): el rango se recorta a los
  *   vanos de vía principal y los vanos de cuadro no se dibujan. o.conFuera = true (ficha de un vano de cuadro) muestra todo.
+ * c45 (24/10/2026): triángulo ▼ en el MÍNIMO DEL VANO que da el estado vigente (v_estado_vano: valor y km), del color del
+ *   estado. La curva guarda un punto cada 0,5 m y una caída de una sola lectura puede no verse: el triángulo marca el valor
+ *   real. Siempre en alerta y crítico; en normal, solo de cerca. Con lugar, el valor al lado.
  * ===================================================================== */
 (function (global) {
   'use strict';
@@ -2004,6 +2028,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       todos = todos.filter(function (v) { return v.kf > o.ki - 1e-6 && v.ki < o.kf + 1e-6; });
     }
     var est = (M.EST[o.rec + '|' + o.via] || []);
+    var MINS = todos.filter(function (v) { return v.fuente === 'geismar' && v.val != null && v.km_min != null; });   // c45
     var CAL = Mo.calibreEn ? Mo.calibreEn(M, o.rec, o.via, o.ki - 0.5, o.kf + 0.5) : [], verCal = true;
     var TNS = Mo.neutrosEn ? Mo.neutrosEn(M, o.rec, o.via, o.ki - 0.5, o.kf + 0.5) : [];        // c38
     var CSEC = Mo.seccionesEn ? Mo.seccionesEn(M, o.rec, o.via, o.ki - 0.5, o.kf + 0.5) : [];   // c38
@@ -2116,6 +2141,11 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       var hijos = [h('div', null, h('b', null, km(k)), v ? ' · ' + v.piquete_desde + ' → ' + v.piquete_hasta : '')];
       if (v) hijos.push(h('div', null, (v.cnum == null ? 'sin cantón' : 'Cantón ' + v.cnum) + ' · vigente: ' + ((UI.ESTADO[v.estado] || {}).t || 'sin umbral') +
         (v.val != null ? ' ' + mm(v.val) + ' mm (' + UI.fecha(v.fecha_dato) + ')' : '') + (v.revisar ? ' ⚑' : '')));
+      if (v && v.fuente === 'geismar' && v.val != null && v.km_min != null) {   // c45: dónde está el mínimo y si la curva lo muestra
+        var mid = (v.mediciones || []).filter(function (id) { return M.MED[id] && M.MED[id].fecha === v.fecha_dato; })[0], cv = mid && SER[mid] ? Mo.minEnVano(SER[mid], v.ki, v.kf) : null;
+        hijos.push(h('div', { class: 'rd-tip-min' }, '▼ Mínimo del vano: ' + mm(v.val) + ' mm en ' + km(+v.km_min)));
+        if (cv && cv.val > v.val + 0.1) hijos.push(h('div', { class: 'rd-peq' }, 'Lectura puntual: la curva (un punto cada 0,5 m) llega hasta ' + mm(cv.val) + ' mm'));
+      }
       geo.ids.forEach(function (id) {
         var q = valorEn(SER[id], k);
         hijos.push(h('div', null, h('span', { style: 'color:' + col[id] }, '■ '), UI.fecha(M.MED[id].fecha) + ': ' + (q >= 0 ? mm((q + 5000) / 1000) + ' mm' : q === -2 ? 'relleno 15,49 (no medido)' : 'sin lectura')));
@@ -2134,7 +2164,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       }
       tip.replaceChildren.apply(tip, hijos);
       tip.hidden = false; var wr = wrap.getBoundingClientRect();
-      tip.style.left = Math.max(0, Math.min(ev.clientX - wr.left + 12, wr.width - 240)) + 'px'; tip.style.top = (ev.clientY - wr.top + 14) + 'px';
+      tip.style.left = Math.max(0, Math.min(ev.clientX - wr.left + 12, wr.width - (tip.offsetWidth || 240))) + 'px';   // c45: con el ancho real tip.style.top = (ev.clientY - wr.top + 14) + 'px';
     }
     function dibujar() {
       var W = Math.max(300, fig.clientWidth || 900), cel = W < 600, ml = cel ? 30 : 42, mr = 8;
@@ -2145,6 +2175,9 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       var ymin = u.limite - 0.5, ymax = u.nominal + 0.4;
       ids.forEach(function (id) { var x = Mo.minEnVano(SER[id], a, b); if (x && x.val < ymin + 0.3) ymin = Math.floor(x.val - 0.3); });
       var calV = verCal ? CAL.filter(function (p) { return p.km >= a && p.km <= b; }) : [];
+      var visiblesV = todos.filter(function (v) { return v.kf > a && v.ki < b; }), pxV = visiblesV.length ? (W - ml - mr) / visiblesV.length : 0;
+      var minV = MINS.filter(function (v) { var k = +v.km_min; return k >= a && k <= b && (v.estado === 'alerta' || v.estado === 'critico' || pxV > 14); });   // c45
+      minV.forEach(function (v) { if (v.val < ymin + 0.3) ymin = Math.floor(v.val - 0.3); });
       calV.forEach(function (p) { if (p.mm < ymin + 0.3) ymin = Math.floor(p.mm - 0.3); if (p.mm > ymax) ymax = Math.ceil(p.mm + 0.2); });
       var sy = function (y) { return mt + (ymax - y) / (ymax - ymin) * hc; };
       var s = [];
@@ -2190,6 +2223,16 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
         }
         s.push('<path d="' + d + '" fill="none" stroke="' + col[id] + '" stroke-width="1.4" stroke-linejoin="round"/>');
         (se.sueltos || []).forEach(function (p) { if (p[0] >= a && p[0] <= b) s.push('<circle cx="' + sx(p[0]).toFixed(1) + '" cy="' + sy(p[1]).toFixed(1) + '" r="2.4" fill="' + col[id] + '"/>'); });
+      });
+      var finLab = -1e9;
+      minV.slice().sort(function (x, y) { return (+x.km_min) - (+y.km_min); }).forEach(function (v) {   // c45: mínimo del vano (estado vigente)
+        var cx = sx(+v.km_min), cy = sy(v.val), r = 5, c = Mo.EST_COL[v.estado] || '#6a7075';
+        s.push('<path d="M' + (cx - r).toFixed(1) + ' ' + (cy - r * 1.6).toFixed(1) + 'L' + (cx + r).toFixed(1) + ' ' + (cy - r * 1.6).toFixed(1) + 'L' + cx.toFixed(1) + ' ' + cy.toFixed(1) + 'Z" fill="' + c + '" stroke="#fff" stroke-width=".9"/>');
+        var lab = mm(v.val), wl = lab.length * 6.2;
+        if ((v.estado === 'alerta' || v.estado === 'critico' || pxV > 46) && cx + 7 > finLab + 4 && cx + 7 + wl < W - mr) {
+          T(cx + 7, cy - 3, lab, 'fill="' + c + '" font-weight="700" font-size="10.5" stroke="#fff" stroke-width="3" paint-order="stroke"');
+          finLab = cx + 7 + wl;
+        }
       });
       calV.forEach(function (p) {   // c29: lecturas de calibre (rombo negro)
         var cx = sx(p.km), cy = sy(p.mm), r = 4.2;
@@ -2252,6 +2295,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       h('span', null, h('i', { style: 'background:#d9dcdf' }), 'relleno 15,49 = no medido'),
       o.resaltar ? h('span', null, h('i', { style: 'background:#a9d5ea' }), o.textoResaltar || 'vano consultado') : null,
       h('span', null, h('i', { style: 'background:#7a4b00;height:4px' }), '⚑ dato a confirmar'),
+      MINS.length ? h('span', null, h('b', { class: 'rd-tri' }, '▼'), 'mínimo del vano (da el estado; en normal, solo de cerca)') : null,
       CAL.length ? h('span', null, h('i', { class: 'rd-rombo' }), 'lectura de calibre (verificación en campo)') : null,
       TNS.length ? h('span', null, h('i', { style: 'background:#7b1fa2;width:3px' }), 'TN tramo neutro: aislador entre fases distintas, posible golpe') : null,
       CSEC.length ? h('span', null, h('i', { style: 'background:#b2dfdb;border-left:2px dashed #00796b' }), 'cambio de sección del hilo (según los datos; «?» = a confirmar)') : null,
@@ -2586,11 +2630,17 @@ function parseInforme(libro, nombreArchivo) {
       fecha = fechaArchivo;
     }
     if (fecha && /prog/i.test(String(enc[c2 - 1])) && campanias.every(function (k) { return k.fecha !== fecha; })) {
-      var x = [], y = [];
+      var x = [], y = [], corte = null;
       for (var f2 = 1; f2 < df.length; f2++) {
         var xv = celda(df, f2, c2 - 1), yv = celda(df, f2, c2);
-        if (esNum(xv)) { x.push(xv); y.push(esNum(yv) ? yv : null); }
+        if (!esNum(xv)) continue;
+        // c46: la progresiva vuelve atrás = desde ahí son filas viejas o ajenas que quedaron en la columna
+        // (fila suelta al final, o el resto de una medición anterior más larga). Se corta y se avisa.
+        if (x.length && xv < x[x.length - 1]) { corte = { fila: f2 + 1, de: x[x.length - 1], a: xv, resto: 0 }; for (var f3 = f2; f3 < df.length; f3++) if (esNum(celda(df, f3, c2 - 1))) corte.resto++; break; }
+        x.push(xv); y.push(esNum(yv) ? yv : null);
       }
+      if (corte) avisos.push("La columna " + colLetra(c2 - 1) + " (" + fecha + ") vuelve atrás en la fila " + corte.fila + " (km " + corte.de.toFixed(3) + " → " + corte.a.toFixed(3) +
+        "): se ignoran " + corte.resto + " fila" + (corte.resto === 1 ? "" : "s") + " desde ahí (quedaron de otra medición o sueltas).");
       var etiqueta = String(enc[c2]).replace(/Ø\s*LC\s*/i, "").replace(/(\d{1,2})[-\/.](\d{1,2})[-\/.](\d{4})/, "").trim();
       campanias.push({ fecha: fecha, columna: colLetra(c2), etiqueta: etiqueta, x: x, y: y });
     }
@@ -2710,7 +2760,8 @@ function procesarCampania(camp, vanos, seccion) {
     while (q < x.length && x[q] < v.km_fin) {
       n++;
       if (est[q] === "relleno") nRel++;
-      if (est[q] === "ok") { if (prevOk !== null && x[q] - prevOk < 0.002) cubKm += x[q] - prevOk; prevOk = x[q]; } else prevOk = null;
+      // c47: las caídas también son lecturas: cuentan en la cobertura (antes un vano con muchas caídas quedaba «sin dato»)
+      if (est[q] === "ok" || est[q] === "pico") { if (prevOk !== null && x[q] - prevOk < 0.002) cubKm += x[q] - prevOk; prevOk = x[q]; } else prevOk = null;
       if (est[q] === "ok" && !esPico[q]) { nOk++; suma += y[q]; if (y[q] < minC) minC = y[q]; if (suav[q] !== null && suav[q] < minS) minS = suav[q]; }
       if (esPico[q]) nPico++;
       q++;
@@ -2721,7 +2772,12 @@ function procesarCampania(camp, vanos, seccion) {
               cobertura: +cobertura.toFixed(2) };
     if (n === 0) return; // fuera del rango medido
     if (v.seccion && v.seccion !== seccion) { r.estado = "seccion_distinta"; resultados.push(r); return; } // medido con otro perfil de hilo: el valor no es válido
-    if (cobertura < REGLAS.coberturaMin) { r.estado = nRel > n / 2 ? "sin_dato_relleno" : "sin_dato"; }
+    // c47 (Sebastián 25/10/2026, reemplaza s31): una pasada parcial cuyo mínimo da alerta o crítico le da ese valor al vano,
+    // con ⚑ «dato a confirmar». Si da normal, sigue «sin dato».
+    var minParcial = Infinity;
+    if (cobertura < REGLAS.coberturaMin) for (var zp = p; zp < q; zp++) if ((est[zp] === "ok" || est[zp] === "pico") && y[zp] < minParcial) minParcial = y[zp];
+    var parcialBajo = cobertura < REGLAS.coberturaMin && minParcial <= perf.alerta;
+    if (cobertura < REGLAS.coberturaMin && !parcialBajo) { r.estado = nRel > n / 2 ? "sin_dato_relleno" : "sin_dato"; }
     else {
       // mínimo con todo lo medido, incluidas las caídas aisladas: una caída solo se descarta cuando un operador la clasifica como dato erróneo
       var minTodo = minC, kmMin = null;
@@ -2729,10 +2785,11 @@ function procesarCampania(camp, vanos, seccion) {
       for (var z2 = p; z2 < q; z2++) if ((est[z2] === "ok" || est[z2] === "pico") && y[z2] === minTodo) { kmMin = x[z2]; break; }
       r.min_mm = +minTodo.toFixed(3);
       r.km_min = kmMin === null ? null : +kmMin.toFixed(4);
-      r.min_sin_caidas_mm = +minC.toFixed(3);
-      r.min_suavizado_mm = +(minS === Infinity ? minC : minS).toFixed(3);
-      r.revisar = minTodo < minC - 0.05; // el mínimo lo define una caída aislada todavía sin clasificar
-      r.prom_mm = +(suma / nOk).toFixed(3);
+      r.min_sin_caidas_mm = minC === Infinity ? null : +minC.toFixed(3);
+      r.min_suavizado_mm = minS === Infinity ? (minC === Infinity ? null : +minC.toFixed(3)) : +minS.toFixed(3);
+      r.revisar = parcialBajo || minC === Infinity || minTodo < minC - 0.05; // caída aislada sin clasificar, o pasada parcial con valor bajo (c47)
+      r.parcial = parcialBajo || undefined;
+      r.prom_mm = nOk ? +(suma / nOk).toFixed(3) : null;
       r.vida_consumida = +((perf.nominal - r.min_mm) / (perf.nominal - perf.limite) * 100).toFixed(1);
       r.estado = r.min_mm <= perf.limite ? "critico" : r.min_mm <= perf.alerta ? "alerta" : "normal";
     }
@@ -2817,6 +2874,11 @@ if (typeof module !== "undefined") module.exports = { elegirRecorrido: elegirRec
   function uniq(a) { return a.filter(function (x, i) { return a.indexOf(x) === i; }); }
   function claveVano(recorrido, via, d, h) { return recorrido + '|' + via + '|' + d + '|' + h; }
   function okk(s) { return s === 'ok' || s === 'pico'; }
+  // Rango real de la progresiva. Algunos informes traen al final una fila suelta que vuelve atrás
+  // (p. ej. 34,371 → 26,735): el primero y el último no son el rango (c45).
+  function rangoKm(x) { var lo = Infinity, hi = -Infinity; for (var i = 0; i < x.length; i++) { if (x[i] < lo) lo = x[i]; if (x[i] > hi) hi = x[i]; } return [lo, hi]; }
+  // Tramos donde la progresiva avanza (se corta donde vuelve atrás): [[desde, hasta], ...] índices inclusive.
+  function tramosCrecientes(x) { var t = [], ini = 0; for (var i = 1; i < x.length; i++) if (x[i] < x[i - 1]) { t.push([ini, i - 1]); ini = i; } if (x.length) t.push([ini, x.length - 1]); return t; }
   function fechaDeNombre(n) { var m = /(20\d{2})(\d{2})(\d{2})/.exec(n || ''); return m ? m[1] + '-' + m[2] + '-' + m[3] : null; }
 
   /* ------------------------------------------------------------------
@@ -2872,7 +2934,7 @@ if (typeof module !== "undefined") module.exports = { elegirRecorrido: elegirRec
         if (/^\d*$/.test(et)) et = ''; // «Ø LC1 23-03-2021» deja un «1» suelto: no es una etiqueta
         g.etiqueta = g.etiqueta || et;
         g.fuentes.push({ archivo: inf.nombre, huella: inf.huella, seccion: I.seccion, esActual: c.fecha === ultima, c: c, Rc: Rc,
-                         versionInforme: I.versionPiquetes, avisos: I.avisos, km: [c.x[0], c.x[c.x.length - 1]] });
+                         versionInforme: I.versionPiquetes, avisos: I.avisos, km: rangoKm(c.x) });
       });
     });
 
@@ -2919,7 +2981,8 @@ if (typeof module !== "undefined") module.exports = { elegirRecorrido: elegirRec
         var f = desdeFuente[r.vano], grp = null;
         f.Rc.picos.forEach(function (p) { if (r.km_min != null && r.km_min >= p.km_desde - 0.0015 && r.km_min <= p.km_hasta + 0.0015) grp = grp || p; });
         return { vano: r.vano, km_desde: r5(grp ? grp.km_desde : r.km_min), km_hasta: r5(grp ? grp.km_hasta : r.km_min), valor_min_mm: r.min_mm,
-                 clasificacion: real ? 'real' : 'sin_revisar', nota: real };
+                 // c47 (Sebastián 25/10/2026): la regla automática solo vale para estado normal; alerta y crítico quedan ⚑
+                 clasificacion: real && r.estado === 'normal' ? 'real' : 'sin_revisar', nota: real && r.estado === 'normal' ? real : null };
       });
       var tramos = uniq(resultados.filter(function (r) { return r.estado !== 'seccion_distinta'; }).map(function (r) { return r._tramo; })).sort(function (a, b) { return a - b; });
       var kmIni = Math.min.apply(null, g.fuentes.map(function (f) { return f.km[0]; })), kmFin = Math.max.apply(null, g.fuentes.map(function (f) { return f.km[1]; }));
@@ -2998,16 +3061,22 @@ if (typeof module !== "undefined") module.exports = { elegirRecorrido: elegirRec
     var vals = new Array(N); for (var z = 0; z < N; z++) vals[z] = -1;
     var sueltos = [];
     g.fuentes.forEach(function (f) {
-      var c = f.c, est = f.Rc.estado, j = 0;
-      for (var i = 0; i < N; i++) {
-        var gk = km0 + i * PASO_GRILLA;
-        if (gk < c.x[0] || gk > c.x[c.x.length - 1] || vals[i] >= 0) continue;
-        while (j < c.x.length - 2 && c.x[j + 1] < gk) j++;
-        if (est[j] === 'relleno' && est[j + 1] === 'relleno') { vals[i] = -2; continue; }
-        if (!okk(est[j]) || !okk(est[j + 1]) || (c.x[j + 1] - c.x[j]) > 0.003) continue;
-        var y = c.y[j] + (c.y[j + 1] - c.y[j]) * (gk - c.x[j]) / ((c.x[j + 1] - c.x[j]) || 1);
-        vals[i] = Math.max(0, Math.round(y * 1000) - 5000);
-      }
+      var c = f.c, est = f.Rc.estado;
+      // cada tramo donde la progresiva avanza se interpola por separado; lo que ya tiene dato no se pisa (c45).
+      // Desde c46 core.parseInforme corta la columna donde la progresiva vuelve atrás: llega un solo tramo.
+      tramosCrecientes(c.x).forEach(function (t) {
+        var a = t[0], b = t[1], j = a;
+        if (b <= a) return;
+        for (var i = 0; i < N; i++) {
+          var gk = km0 + i * PASO_GRILLA;
+          if (gk < c.x[a] || gk > c.x[b] || vals[i] >= 0) continue;
+          while (j < b - 1 && c.x[j + 1] < gk) j++;
+          if (est[j] === 'relleno' && est[j + 1] === 'relleno') { vals[i] = -2; continue; }
+          if (!okk(est[j]) || !okk(est[j + 1]) || (c.x[j + 1] - c.x[j]) > 0.003) continue;
+          var y = c.y[j] + (c.y[j + 1] - c.y[j]) * (gk - c.x[j]) / ((c.x[j + 1] - c.x[j]) || 1);
+          vals[i] = Math.max(0, Math.round(y * 1000) - 5000);
+        }
+      });
       for (var k = 0; k < c.x.length; k++) {
         if (!okk(est[k])) continue;
         var pr = k > 0 ? c.x[k] - c.x[k - 1] : 1, nx = k < c.x.length - 1 ? c.x[k + 1] - c.x[k] : 1;
@@ -3154,8 +3223,8 @@ if (typeof module !== "undefined") module.exports = { elegirRecorrido: elegirRec
           return { medicion_id: med.id, vano_id: mapaVano[x.vano], km_desde: x.km_desde, km_hasta: x.km_hasta, valor_min_mm: x.valor_min_mm };
         }), 'id');
         var reales = m.anomalias.filter(function (x) { return x.clasificacion === 'real'; });
-        if (reales.length) await q('Clasificar anomalías como reales', sb.from('anomalia').update({ clasificacion: 'real', nota: reales[0].nota })
-                                     .in('id', an.map(function (x) { return x.id; })));
+        var idsReales = an.filter(function (x, i) { return m.anomalias[i].clasificacion === 'real'; }).map(function (x) { return x.id; });   // c47: solo las marcadas
+        if (idsReales.length) await q('Clasificar anomalías como reales', sb.from('anomalia').update({ clasificacion: 'real', nota: reales[0].nota }).in('id', idsReales));
       }
       if (m.serie) {
         var ruta = 'medicion/' + med.id + '.json.gz';
@@ -3281,7 +3350,7 @@ if (typeof module !== "undefined") module.exports = { elegirRecorrido: elegirRec
     }
 
     var msg = h('div');
-    if (ctx.query.link === 'invalido') msg.appendChild(UI.mensaje('error', 'El link del mail venció o ya se usó. Pedile a un administrador de la app que te reinicie la contraseña.'));
+    if (ctx.query.link === 'invalido') msg.appendChild(UI.mensaje('error', 'El link del mail venció o ya se usó. Tocá «Olvidé mi contraseña» y pedí un código.'));
     else if (ctx.query.volver) msg.appendChild(UI.mensaje('info', 'Esa pantalla es para operadores y administradores. Ingresá para verla.'));
 
     var mail = h('input', { id: 'ing-mail', type: 'email', autocomplete: 'username', inputmode: 'email', required: true, autocapitalize: 'off', spellcheck: 'false' });
@@ -3319,32 +3388,64 @@ if (typeof module !== "undefined") module.exports = { elegirRecorrido: elegirRec
       location.replace(volver);
     });
 
-    // Recuperar contraseña
+    // c43 (23/10/2026): recuperar la contraseña con un código de 6 dígitos que llega por mail (sin depender de un administrador).
+    // Paso 1: mail → «Mandar código». Paso 2: código + contraseña nueva (dos veces) → entra a la app.
     var recMail = h('input', { id: 'rec-mail', type: 'email', autocomplete: 'username', inputmode: 'email', autocapitalize: 'off', spellcheck: 'false' });
-    var recBoton = h('button', { class: 'btn', type: 'submit' }, 'Mandar link');
-    var recMsg = h('div');
-    var rec = h('form', { class: 'form', novalidate: true, hidden: true },
-      h('p', { class: 'nota' }, 'Te mandamos un link por mail para definir una contraseña nueva.'),
+    var recCod = h('input', { id: 'rec-codigo', type: 'text', inputmode: 'numeric', autocomplete: 'one-time-code', maxlength: 10, pattern: '[0-9 ]*', placeholder: '123456' });
+    var r1 = campoClave('rec-n1', 'Contraseña nueva', 'new-password'), r2 = campoClave('rec-n2', 'Repetir la contraseña nueva', 'new-password');
+    var recBoton = h('button', { class: 'btn', type: 'submit' }, 'Mandar código');
+    var recBoton2 = h('button', { class: 'btn', type: 'submit' }, 'Guardar y entrar');
+    var recMsg = h('div'), recMsg2 = h('div');
+    function volverIngreso() { rec.hidden = true; rec2.hidden = true; form.hidden = false; msg.replaceChildren(); }
+    var rec = h('form', { class: 'form', novalidate: true, hidden: true, id: 'rec-paso1' },
+      h('p', { class: 'nota' }, 'Escribí tu mail institucional. Te mandamos un código de 6 dígitos para elegir una contraseña nueva.'),
       h('div', { class: 'campo' }, h('label', { for: 'rec-mail' }, 'Mail'), recMail), recMsg,
-      h('div', { class: 'acciones' }, recBoton, h('button', { type: 'button', class: 'btn lnk', onclick: function () { rec.hidden = true; form.hidden = false; } }, 'Volver')));
-    // 16/10: el correo institucional quita los links de los mails externos (el de Supabase llega sin link).
-    // La recuperación es por un administrador (Usuarios → Reiniciar contraseña). El formulario por mail queda guardado, sin uso.
-    function mostrarRecuperar() { msg.replaceChildren(UI.mensaje('info', 'Pedile a un administrador de la app que te reinicie la contraseña: te pasa una provisoria y al entrar elegís una nueva.')); }
+      h('div', { class: 'acciones' }, recBoton, h('button', { type: 'button', class: 'btn lnk', onclick: function () { mostrarPaso2(); } }, 'Ya tengo un código'), h('button', { type: 'button', class: 'btn lnk', onclick: volverIngreso }, 'Volver')));
+    var rec2 = h('form', { class: 'form', novalidate: true, hidden: true, id: 'rec-paso2' },
+      h('p', { class: 'nota' }, 'Copiá el código del mail «Restablecer contraseña» (puede tardar unos minutos; mirá también el correo no deseado). Vence en 1 hora y sirve una sola vez.'),
+      h('div', { class: 'campo' }, h('label', { for: 'rec-codigo' }, 'Código'), recCod), r1.nodo, r2.nodo,
+      h('p', { class: 'nota', style: 'margin:0' }, 'Mínimo 8 caracteres, con letras y números.'), recMsg2,
+      h('div', { class: 'acciones' }, recBoton2, h('button', { type: 'button', class: 'btn lnk', onclick: function () { rec2.hidden = true; rec.hidden = false; } }, 'Pedir otro código'), h('button', { type: 'button', class: 'btn lnk', onclick: volverIngreso }, 'Volver')));
+    function mostrarRecuperar() { msg.replaceChildren(); form.hidden = true; rec2.hidden = true; rec.hidden = false; if (mail.value && !recMail.value) recMail.value = mail.value.trim(); recMail.focus(); }
+    function mostrarPaso2() { rec.hidden = true; rec2.hidden = false; recCod.focus(); }
     rec.addEventListener('submit', async function (e) {
       e.preventDefault();
       recMsg.replaceChildren();
-      if (!recMail.value.trim()) { recMsg.appendChild(UI.mensaje('error', 'Escribí tu mail.')); return; }
-      recBoton.disabled = true;
-      var r = await Conexion.recuperarClave(recMail.value);
-      recBoton.disabled = false;
+      if (!/^\S+@\S+\.\S+$/.test(recMail.value.trim())) { recMsg.appendChild(UI.mensaje('error', 'Escribí tu mail completo.')); return; }
+      recBoton.disabled = true; recBoton.textContent = 'Mandando…';
+      var r = await Conexion.pedirCodigo(recMail.value);
+      recBoton.disabled = false; recBoton.textContent = 'Mandar código';
+      if (r.error) { recMsg.appendChild(UI.mensaje('error', r.error)); return; }
       // Mismo mensaje exista o no el usuario: no se revela quién tiene cuenta.
-      recMsg.appendChild(r.error ? UI.mensaje('error', r.error)
-        : UI.mensaje('ok', 'Si ese mail tiene usuario, te llega un link en unos minutos. Revisá también el correo no deseado.'));
+      recMsg2.replaceChildren(UI.mensaje('ok', 'Si ese mail tiene usuario, te llega el código en unos minutos.'));
+      mostrarPaso2();
+    });
+    rec2.addEventListener('submit', async function (e) {
+      e.preventDefault();
+      recMsg2.replaceChildren();
+      var cod = recCod.value.replace(/\s/g, '');
+      if (!recMail.value.trim()) { rec2.hidden = true; rec.hidden = false; recMsg.appendChild(UI.mensaje('error', 'Primero escribí tu mail.')); return; }
+      if (!/^[0-9]{6,10}$/.test(cod)) { recMsg2.appendChild(UI.mensaje('error', 'El código son los números del mail (6 dígitos).')); return; }
+      if (!r1.input.value) { recMsg2.appendChild(UI.mensaje('error', 'Escribí la contraseña nueva.')); return; }
+      if (r1.input.value !== r2.input.value) { recMsg2.appendChild(UI.mensaje('error', 'Las dos contraseñas no coinciden.')); return; }
+      recBoton2.disabled = true; recBoton2.textContent = 'Guardando…';
+      ctx.app.estado.ingresando = true;
+      var r;
+      try { r = await Conexion.restablecerConCodigo(recMail.value, cod, r1.input.value); }
+      catch (err) { r = { error: Conexion.traducirError(err) }; }
+      finally { ctx.app.estado.ingresando = false; }
+      recBoton2.disabled = false; recBoton2.textContent = 'Guardar y entrar';
+      if (r.error) { recMsg2.appendChild(UI.mensaje('error', r.error)); return; }
+      r1.input.value = r2.input.value = '';
+      try { if (recordar.checked) localStorage.setItem(CLAVE_MAIL, recMail.value.trim()); } catch (e2) { /* sin almacenamiento */ }
+      await ctx.app.aplicarSesion(r.sesion);
+      UI.toast('Contraseña nueva guardada. Hola, ' + (r.sesion.nombre || r.sesion.mail) + '.');
+      location.replace(volver);
     });
 
     el.replaceChildren(
       UI.encabezado('Ingresar', 'Con tu mail institucional y tu contraseña. Si no tenés usuario, pedíselo a un administrador de la app.'),
-      UI.card(null, null, msg, form, rec));
+      UI.card(null, null, msg, form, rec, rec2));
     if (!matchMedia('(max-width: 760px)').matches) (mail.value ? clave.input : mail).focus();
   }
 
@@ -5134,6 +5235,11 @@ if (typeof module !== "undefined") module.exports = { elegirRecorrido: elegirRec
           ' (' + UI.plural(+e.lecturas_calibre || 0, 'lectura') + '). Último dato del Geismar: ' + (e.valor_geismar_mm != null ? UI.mm(e.valor_geismar_mm) + ' (' + ((UI.ESTADO[e.estado_geismar] || {}).t || '—') + ') el ' + UI.fecha(e.fecha_geismar) : 'sin medición válida') +
           '. La próxima medición del Geismar vuelve a mandar.' + (e.verificado_en_parte ? ' Se verificó solo una parte del vano y el Geismar no tiene medición válida del resto.' : '')) : null,   // c29
         tec && vig.length > 1 ? UI.mensaje('info', UI.plural(vig.length, 'medición', 'mediciones') + ' con dato el ' + UI.fecha(e.fecha_dato) + ' (' + vig.map(function (l) { return UI.mm(l.valor_mm); }).join(' y ') + '): el estado toma el mínimo.') : null,
+        (function () {   // c47: el valor vigente viene de una pasada que leyó menos de la mitad del vano
+          var pv = e.fuente !== 'calibre' ? vig.filter(function (l) { return l.cobertura != null && +l.cobertura < 0.5 && +l.valor_mm === +e.valor_mm; })[0] : null;
+          return pv ? h('div', { class: 'rd-aviso', style: 'margin-top:8px' }, h('b', null, 'Medido solo en parte: '), 'el equipo leyó el ' + UI.num(+pv.cobertura * 100, 0) +
+            ' % del vano. Como lo leído da ' + ((UI.ESTADO[e.estado] || {}).t || e.estado).toLowerCase() + ', vale como dato a confirmar hasta que se revise o se verifique en campo.') : null;
+        })(),
         e.revisar ? h('p', { class: 'nota', style: 'margin:6px 0 0' }, 'Dato a confirmar: una sola lectura dio un valor bajo y todavía nadie confirmó si es real o un error del equipo. Vale como está hasta que un operador lo revise o se verifique en campo con calibre' + (tec ? ' (ver «Lecturas aisladas»).' : '.')) : null,
         h('dl', { class: 'datos', style: 'margin-top:12px' },
           [h('dt', null, 'Medición anterior'), h('dd', null, anterior ? [UI.mm(anterior.valor_mm) + ' (' + UI.fecha(anterior.fecha) + ') · ', h('span', { class: claseDif(d) }, signo(d)),
@@ -7287,6 +7393,11 @@ if (typeof module !== "undefined") module.exports = { elegirRecorrido: elegirRec
         'Tocá un tramo y elegí la vía. Vas bajando: tramo → entre estaciones → cantón → vano.',
         'En cada nivel ves piquetes y progresiva, el gráfico del hilo y la lista para seguir bajando.'],
         ir: ['#/', 'Ir a Inicio'] },
+      { id: 'minimo', para: 'todos', q: '¿Por qué el estado dice un valor que la curva no muestra?', pasos: [
+        'El estado del vano sale de la lectura más baja del Geismar dentro del vano.',
+        'La curva se guarda con un punto cada medio metro. Si el valor bajo es una sola lectura, entre dos puntos, la curva no llega hasta ahí.',
+        'Por eso el gráfico marca con un triángulo ▼ el mínimo que da el estado, con su valor, del color del estado. Pasando el dedo o el mouse por el vano ves en qué km está.',
+        'Si es una lectura aislada, el vano también tiene ⚑ mientras nadie la confirme. La verificación con calibre la cierra.'] },
       { id: 'atender', para: 'todos', q: '¿Qué vanos hay que atender?', pasos: [
         'Listados → Para atender: vanos críticos y en alerta, del más gastado al menos gastado.',
         'Filtrá por tramo y vía para ver solo tu zona.',
@@ -7295,11 +7406,13 @@ if (typeof module !== "undefined") module.exports = { elegirRecorrido: elegirRec
       { id: 'verificar', para: 'todos', q: '¿Qué conviene verificar en campo?', pasos: [
         'Listados → Para verificar en campo: valores bajos que todavía no están confirmados.',
         '«Dato a confirmar»: una sola lectura dio un valor bajo y nadie confirmó todavía si es real o un error del equipo. Mientras tanto cuenta como real.',
-        '«Medido solo en parte»: el equipo leyó menos de la mitad del vano y lo leído da alerta o crítico. No cambia el estado, pero conviene mirarlo.',
+        '«Medido solo en parte»: el equipo leyó menos de la mitad del vano. Si lo leído da alerta o crítico, el vano toma ese valor como dato a confirmar (⚑); si da normal, queda «sin medición válida».',
         'La lista incluye lecturas aisladas que todavía nadie revisó: no todo lo que aparece es un problema.',
-        'Cuando la guardia mide con calibre, pasale las lecturas a un operador para que las cargue. Así el vano se actualiza y el ⚑ se cierra.'],
+        'Cuando la guardia mide con calibre, la planilla escaneada se le manda por mail al operador, que carga las lecturas. Así el vano se actualiza y el ⚑ se cierra.',
+        'Después revisá en «En campo» lo cargado de tu tramo: si no coincide con la planilla, avisale al operador para que lo corrija.'],
         ir: ['#/listados/verificar', 'Ir a Para verificar'] },
       { id: 'calibre', para: 'informa', q: '¿Cómo cargo una verificación con calibre?', pasos: [
+        'Las lecturas llegan por mail: la planilla de la guardia, escaneada, que manda el jefe de base. Tenela abierta mientras cargás.',
         'Entrá a la ficha del vano (o a la pantalla del cantón) y tocá «Informar verificación».',
         'Completá la fecha, quién midió y el sector: desde el piquete + metros, hasta el piquete + metros. Los metros se cuentan desde el piquete hacia el siguiente.',
         'Cargá cada lectura: piquete, metros y la altura en mm. Podés usar «Agregar posiciones cada 5 m» y llenar solo los mm, o pegar varias lecturas de una planilla. Enter pasa a la siguiente.',
@@ -7365,7 +7478,7 @@ if (typeof module !== "undefined") module.exports = { elegirRecorrido: elegirRec
       { id: 'cuenta', para: 'todos', q: '¿Cómo cambio mi contraseña o salgo?', pasos: [
         'Tocá tu nombre, arriba a la derecha (en el celular: Más → Mi cuenta).',
         'Ahí cambiás la contraseña o tocás «Salir». En una PC compartida, salí siempre al terminar.',
-        'Si te olvidaste la contraseña, pedile a un administrador de la app que te la reinicie: te pasa una provisoria y al entrar elegís una nueva.'],
+        'Si te olvidaste la contraseña: en Ingresar tocá «Olvidé mi contraseña», escribí tu mail y te llega un código de 6 dígitos (mirá también el correo no deseado). Con ese código elegís una contraseña nueva. Si no te llega, pedile a un administrador que te la reinicie.'],
         ir: ['#/cuenta', 'Ir a Mi cuenta'] },
       { id: 'revision', para: 'operador', q: '¿Cómo reviso una lectura dudosa?', pasos: [
         'Trabajo → Revisión → Lecturas aisladas: las que definen el estado hoy van primero.',
@@ -8906,7 +9019,7 @@ if (typeof module !== "undefined") module.exports = { elegirRecorrido: elegirRec
     await aplicarSesion(s);
 
     Conexion.alCambiarSesion(function (s2, evento) {
-      if (evento === 'PASSWORD_RECOVERY' && location.hash.indexOf('#/cuenta') !== 0) location.replace('#/cuenta?nueva=1');
+      if (evento === 'PASSWORD_RECOVERY' && !estado.ingresando && location.hash.indexOf('#/cuenta') !== 0) location.replace('#/cuenta?nueva=1');   // c43: con código lo resuelve Ingresar
       if (evento === 'INITIAL_SESSION' || evento === 'TOKEN_REFRESHED') { if (s2 && s2.rol) estado.sesion = s2; return; }
       if (estado.ingresando) return;  // la pantalla Ingresar resuelve su propio resultado
       aplicarSesion(s2, evento);
