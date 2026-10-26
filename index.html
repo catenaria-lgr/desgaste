@@ -607,6 +607,19 @@ table.rd-t { border-collapse: collapse; width: 100%; font-size: 13.5px; font-var
 /* c48: pedido de verificación («en verificación desde dd-mm»): no es un estado, es un aviso de trabajo */
 .chip.ped { background: #e6f0fb; color: #1b4f86; border: 1px dashed #7aa7d6; }
 .rd-aviso.ped { background: #eef5fd; border-color: #b9d3ef; }
+
+/* c11 (26/10/2026): Administración — Auditoría, Umbrales y Planilla (solo lectura) */
+.filtros input[type=date] { font: inherit; font-size: 14px; border: 1px solid #cfcfcf; border-radius: 999px; padding: 6px 12px; min-height: 38px; background: var(--surface); max-width: 100%; }
+ul.au-lista { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.au-it { border: 1px solid var(--line); border-radius: 10px; padding: 8px 12px; background: var(--surface); min-width: 0; }
+.au-it.auto { background: #fafafa; }
+.au-cab { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; font-size: 13.5px; }
+.au-cab .au-f { font-family: var(--mono); font-size: 12.5px; color: var(--muted); }
+.au-cab .btn { margin-left: auto; }
+.au-que { font-size: 14px; margin-top: 3px; overflow-wrap: anywhere; }
+.au-det { margin-top: 8px; padding-top: 8px; border-top: 1px dashed var(--line); }
+.au-det dl.datos { font-size: 13px; }
+.au-det .tabla td { overflow-wrap: anywhere; }
 </style>
 <script>
   /* Antes de que supabase-js lea y limpie la dirección: ¿venimos del link de
@@ -8041,8 +8054,8 @@ if (typeof module !== "undefined") module.exports = { combinadas: combinadas, el
         'Si un informe se reprocesó, cargá el informe nuevo en Carga de medición: la app ofrece reemplazar la publicada sin perder las clasificaciones (ver «¿Cómo cargo una medición nueva?»).'],
         ir: ['#/mediciones', 'Ir a Mediciones'] },
       { id: 'usuarios', para: 'admin', q: '¿Cómo doy de alta o de baja a un usuario?', pasos: [
-        'Administración → Usuarios → Agregar usuario: mail institucional, nombre, perfil (y cargo si es Análisis y gestión).',
-        'La app muestra una contraseña provisoria una sola vez: copiala con «Copiar para mandar» y pasásela al usuario. Al entrar la tiene que cambiar.',
+        'Administración → Usuarios → Agregar usuario: mail institucional, nombre, perfil (y cargo si es Análisis y gestión). El cargo decide quién puede pedir verificación: Jefe de base y Coordinación.',
+        'No hace falta mandar la contraseña provisoria que muestra la app: el usuario entra con «Olvidé mi contraseña» y su mail institucional, y elige la suya con el código que le llega.',
         'Olvido de contraseña: «Reiniciar contraseña» en su fila. Baja: «Desactivar» (tocando dos veces). Nunca se borra un usuario.',
         'No desactives «Copia diaria (automática)»: lo usa la copia de seguridad todas las noches.'],
         ir: ['#/admin/usuarios', 'Ir a Usuarios'] },
@@ -8050,7 +8063,19 @@ if (typeof module !== "undefined") module.exports = { combinadas: combinadas, el
         'El número junto a «En campo» cuenta las verificaciones e intervenciones que todavía ningún administrador vio.',
         'En «En campo», con «Sin ver por un administrador», mirá primero las que cambian el estado de un vano.',
         'Abrí cada una, controlá las lecturas y tocá «Marcar como visto». Si algo está mal cargado, anulala con el motivo (también lo puede hacer quien la cargó).'],
-        ir: ['#/campo?ver=sinver', 'Ir a En campo'] }
+        ir: ['#/campo?ver=sinver', 'Ir a En campo'] },
+      { id: 'auditoria', para: 'admin', q: '¿Cómo veo quién hizo un cambio?', pasos: [   // c11
+        'Administración → Auditoría: cada carga, publicación, anulación, clasificación, verificación, intervención, pedido, cambio de usuario o de configuración, con quién y cuándo.',
+        'Filtrá por qué (por ejemplo, Revisión de lecturas), por quién y por fechas. Si sabés el número (de una medición, una lectura o una verificación), escribilo en «Registro».',
+        '«Detalle» muestra qué datos cambiaron, antes y después. «Exportar a Excel» baja lo filtrado.',
+        'Es solo lectura: nadie la puede modificar desde la app. Lo hecho con un script de la base figura «sin usuario».'],
+        ir: ['#/admin/auditoria', 'Ir a Auditoría'] },
+      { id: 'configuracion', para: 'admin', q: '¿Dónde veo los umbrales y la planilla de piquetes?', pasos: [   // c11
+        'Administración → Umbrales: hilo nuevo, alerta y límite de cada sección, desde cuándo rige la alerta y cuántos vanos hay hoy en cada estado.',
+        'La alerta no se cambia desde la app: un cambio recalcula al instante el estado de todos los vanos. Se decide con la Coordinación y se carga con un script de la base.',
+        'Administración → Planilla de piquetes: la vigente y las anteriores, los códigos de piquete que cambiaron, los límites de los tramos y el Excel original para descargar.',
+        'Una planilla nueva se carga con la herramienta «Planilla nueva» (fuera de la app), que vuelve a ubicar todas las mediciones.'],
+        ir: ['#/admin/umbrales', 'Ir a Umbrales'] }
     ];
   }
 
@@ -8331,9 +8356,9 @@ if (typeof module !== "undefined") module.exports = { combinadas: combinadas, el
   ];
   var ADMIN = [
     { ruta: 'admin/usuarios', titulo: 'Usuarios', tarea: 'c11', texto: 'Alta, perfil, base, baja y reinicio de contraseña de quienes usan la app.', hecha: true },
-    { ruta: 'admin/umbrales', titulo: 'Umbrales', tarea: 'c11', texto: 'Alerta por sección con fecha de vigencia; perfiles de hilo.' },
-    { ruta: 'admin/planilla', titulo: 'Planilla de piquetes', tarea: 'c11 · c17', texto: 'Subir versión nueva, diferencias con la vigente, errores, equivalencia de códigos.' },
-    { ruta: 'admin/auditoria', titulo: 'Auditoría', tarea: 'c11', texto: 'Quién hizo qué y cuándo.' }
+    { ruta: 'admin/umbrales', titulo: 'Umbrales', tarea: 'c11', texto: 'Nominal, alerta y límite vigentes por sección, con su historial. Solo lectura.', hecha: true },
+    { ruta: 'admin/planilla', titulo: 'Planilla de piquetes', tarea: 'c11 · c17', texto: 'Versiones, códigos que cambiaron, límites de los tramos y planilla original. Solo lectura.', hecha: true },
+    { ruta: 'admin/auditoria', titulo: 'Auditoría', tarea: 'c11', texto: 'Quién hizo qué y cuándo, con filtros y exportación a Excel. Solo lectura.', hecha: true }
   ];
 
   function hub(titulo, sub, items, raiz, pestana) {
@@ -8365,7 +8390,7 @@ if (typeof module !== "undefined") module.exports = { combinadas: combinadas, el
   });
   Rutas.definir('/admin', { pantalla: hub('Administración', 'Usuarios, umbrales, planilla de piquetes y auditoría', ADMIN, 'Administración', 'admin'), titulo: 'Administración', pestana: 'admin', requiere: 'admin' });
   ADMIN.forEach(function (it) {
-    if (it.hecha) return;  // Usuarios: usuarios.js (c11)
+    if (it.hecha) return;  // Usuarios: usuarios.js · Umbrales, Planilla y Auditoría: administracion.js (c11, 26/10/2026)
     Rutas.definir('/' + it.ruta, { pantalla: hoja('Administración', '#/admin', it), titulo: it.titulo, pestana: 'admin', requiere: 'admin' });
   });
 })();
@@ -8855,7 +8880,7 @@ if (typeof module !== "undefined") module.exports = { combinadas: combinadas, el
         h('label', { for: 'pv-desde' }, 'Desde el piquete', sDesde),
         h('label', { for: 'pv-hasta' }, 'hasta el piquete', sHasta),
         h('label', { for: 'pv-nota', class: 'ancho' }, 'Qué mirar (opcional)', inNota)),
-        h('p', { class: 'nota' }, 'No cambia el estado del vano ni manda mails: los operadores lo ven pendiente en «En campo», con el número junto al menú. Se cierra solo cuando se carga una verificación con calibre que toca este sector; si no hace falta cargarla, un operador lo cierra con el motivo. Mientras tanto, la ficha y los listados muestran «en verificación desde».')),
+        h('p', { class: 'nota' }, 'No cambia el estado del vano ni manda mails: los operadores lo ven pendiente en «En campo», con el número junto al menú. Cada vano queda medido cuando se cargan lecturas de calibre en él, y el pedido se cierra solo cuando están medidos todos; si no hace falta medir el resto, un operador lo cierra con el motivo. Mientras tanto, la ficha y los listados muestran «en verificación desde».')),
       h('div', { class: 'acciones' }, bt), msg);
   }
 
@@ -9557,6 +9582,424 @@ if (typeof module !== "undefined") module.exports = { combinadas: combinadas, el
   Rutas.definir('/carga', { pantalla: pantalla, titulo: 'Carga de medición', pestana: 'trabajo', requiere: 'operador' });
 })(window);
 
+</script>
+<script>/* js/pantallas/administracion.js */
+/* =====================================================================
+ * Administración (tarea c11, 26/10/2026) — solo administradores, SOLO LECTURA
+ *   #/admin/umbrales    P14 Umbrales: nominal, alerta y límite vigentes por sección, historial y vanos por estado
+ *   #/admin/planilla    P15 Planilla de piquetes: versiones, códigos que cambiaron, límites de tramos, original
+ *   #/admin/auditoria   P16 Auditoría: quién hizo qué y cuándo (tabla auditoria), con filtros, detalle y Excel
+ *
+ * Decisiones (c11, con lo acordado en c50: «Auditoría de solo lectura y Umbrales visibles»):
+ * - Nada se modifica desde estas pantallas. Cambiar la alerta recalcula al instante el estado de TODOS los vanos
+ *   (también el de mediciones viejas: la base usa la alerta vigente hoy), así que se decide con la Coordinación y se
+ *   carga con un script, que queda en la Auditoría. La planilla nueva se carga con la herramienta de c17.
+ * - No necesitan script de la base: leen tablas que el administrador ya puede leer (scripts 01, 10, 11).
+ * - La auditoría la escribe la base (función auditar) o la función de usuarios; nadie la modifica por la API.
+ *   Lo hecho desde el SQL Editor (scripts) o por la función de usuarios a nivel de tabla queda sin usuario.
+ * Todo se arma con UI.h() (texto, nunca HTML con datos de la base).
+ * ===================================================================== */
+(function () {
+  'use strict';
+  var h = UI.h;
+
+  var TABLA = {
+    medicion: 'Mediciones', archivo_fuente: 'Excel registrados', anomalia: 'Revisión', verificacion: 'Calibre',
+    evento_hilo: 'Intervenciones', pedido_verificacion: 'Pedidos de verificación', perfil: 'Usuarios', umbral: 'Umbrales',
+    version_piquetes: 'Planilla', limite_tramo: 'Límites de tramos', cambio_seccion: 'Cambio de sección',
+    zona_sin_lectura: 'Zonas sin lectura', aviso: 'Avisos'
+  };
+  var GRUPOS = [
+    { k: '', t: 'Todo' },
+    { k: 'mediciones', t: 'Mediciones y Excel', tablas: ['medicion', 'archivo_fuente'] },
+    { k: 'revision', t: 'Revisión de lecturas', tablas: ['anomalia'] },
+    { k: 'campo', t: 'En campo (calibre, intervenciones, pedidos)', tablas: ['verificacion', 'evento_hilo', 'pedido_verificacion'] },
+    { k: 'usuarios', t: 'Usuarios', tablas: ['perfil'] },
+    { k: 'config', t: 'Configuración (umbrales, planilla, límites, zonas, avisos)', tablas: ['umbral', 'version_piquetes', 'limite_tramo', 'cambio_seccion', 'zona_sin_lectura', 'aviso'] }
+  ];
+  var CLASIF = { sin_revisar: 'sin revisar', dato_erroneo: 'dato erróneo', real: 'real', verificada_campo: 'verificada en campo' };
+  var TIPO_EV = { reemplazo: 'reemplazo de hilo', reparacion_paralelo: 'tramo paralelo', reparacion: 'reparación', cambio_canton: 'cambio de cantón', otro: 'otra intervención' };
+  var PERFIL = { admin: 'Administrador', operador: 'Operador', gestion: 'Análisis y gestión' };
+  var CARGO = { coordinacion: 'Coordinación', jefe_base: 'Jefe de base', asistente: 'Asistente técnico' };
+  var POR_PAGINA = 50;
+
+  function hora(iso) { var d = new Date(iso); return ('0' + d.getHours()).slice(-2) + ':' + ('0' + d.getMinutes()).slice(-2); }
+  function fechaHora(iso) { return iso ? UI.fecha(iso) + ' ' + hora(iso) : '—'; }
+  function err(rs) { return rs.map(function (r) { return r && r.error; }).filter(Boolean)[0] || null; }
+  async function nombres() {
+    var r = await Conexion.leer('perfil', { columnas: 'id, nombre, rol, cargo, activo', orden: ['nombre'] });
+    var m = {}; (r.datos || []).forEach(function (p) { m[p.id] = p; });
+    return { mapa: m, lista: r.datos || [], error: r.error };
+  }
+  function quien(id, N) { if (!id) return null; var p = N.mapa[id]; return p ? p.nombre : 'usuario ' + String(id).slice(0, 8); }
+  function descargar(bucket, ruta, nombre, boton) {
+    boton.disabled = true;
+    return Conexion.cliente.storage.from(bucket).download(ruta).then(function (r) {
+      if (r.error) throw new Error(Conexion.traducirError(r.error));
+      var a = h('a', { href: URL.createObjectURL(r.data), download: nombre });
+      document.body.appendChild(a); a.click(); setTimeout(function () { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+    }).catch(function (e) { UI.toast('No se pudo descargar: ' + ((e && e.message) || e) + '. Puede que el original no esté guardado en la base.'); })
+      .finally(function () { boton.disabled = false; });
+  }
+  function soloLectura(texto) { return h('div', { class: 'que-hacer', style: '--c: var(--celeste-ink, #12384d)' }, h('b', null, 'Solo lectura. '), texto); }
+
+  /* ------------------------------------------------------------------
+   * P14 Umbrales
+   * ------------------------------------------------------------------ */
+  async function umbrales(ctx) {
+    ctx.miga([{ texto: 'Administración', ruta: '#/admin' }, { texto: 'Umbrales' }]);
+    ctx.el.replaceChildren(UI.encabezado('Umbrales', 'Con qué valores la base calcula el estado de cada vano.'), h('div', { class: 'cargando' }, 'Leyendo umbrales…'));
+    var ref = await ctx.ref();
+    var rs = await Promise.all([
+      Conexion.leer('perfil_hilo', { orden: ['seccion', false] }),
+      Conexion.leer('umbral', { orden: ['vigente_desde', false] }),
+      nombres(),
+      Modelo.cargar(ref)
+    ]);
+    if (!ctx.vigente()) return;
+    var e = err(rs.slice(0, 3)); if (e) { ctx.el.replaceChildren(UI.encabezado('Umbrales'), UI.mensaje('error', e)); return; }
+    var hilos = rs[0].datos, hist = rs[1].datos, N = rs[2], M = rs[3] && rs[3].M, hoy = UI.hoyISO();
+
+    // vanos de vía principal por sección y estado (estado vigente de la base, sin recalcular)
+    var cuenta = {};
+    if (M) M.V.forEach(function (v) { var s = v.seccion || '—'; cuenta[s] = cuenta[s] || {}; cuenta[s][v.estado] = (cuenta[s][v.estado] || 0) + 1; });
+
+    var tarjetas = hilos.map(function (ph) {
+      var p = ref.perfiles[ph.seccion] || {}, vig = hist.filter(function (u) { return u.seccion === ph.seccion && u.vigente_desde <= hoy; })[0];
+      var c = cuenta[ph.seccion] || {};
+      function kpi(t, v, d, cls) { return h('div', { class: 'kpi' + (cls ? ' ' + cls : '') }, h('small', null, t), h('b', null, v), d ? h('span', { class: 'kd' }, d) : null); }
+      return UI.card('Hilo de ' + ph.seccion + ' mm²', null,
+        h('div', { class: 'kpis' },
+          kpi('Hilo nuevo (nominal)', UI.num(ph.nominal_mm, 2) + ' mm', 'altura del hilo sin desgaste'),
+          kpi('Alerta', p.alerta != null ? UI.num(p.alerta, 2) + ' mm' : 'Sin umbral', vig ? 'vigente desde el ' + UI.fecha(vig.vigente_desde) : 'falta cargar la alerta', p.alerta != null ? 'alerta' : 'crit'),
+          kpi('Límite', UI.num(ph.limite_mm, 2) + ' mm', 'a partir de acá, crítico', 'crit')),
+        h('p', { class: 'nota', style: 'margin:10px 0 4px' },
+          (vig ? 'La alerta rige desde el ' + UI.fecha(vig.vigente_desde) + '. ' : '') + 'Crítico: hasta ' + UI.num(ph.limite_mm, 2) + ' mm · En alerta: más de ' + UI.num(ph.limite_mm, 2) + ' y hasta ' + (p.alerta != null ? UI.num(p.alerta, 2) : '—') + ' mm · Normal: más de ' + (p.alerta != null ? UI.num(p.alerta, 2) : '—') + ' mm.'),
+        M ? h('p', { class: 'nota', style: 'margin:0' }, 'Hoy, en vía principal con este hilo: ',
+          h('b', null, UI.plural(c.critico || 0, 'crítico')), ' · ', h('b', null, (c.alerta || 0) + ' en alerta'), ' · ', UI.plural(c.normal || 0, 'normal', 'normales'),
+          ' · ', (c.sin_dato || 0) + ' sin medición válida · ', UI.plural(c.nunca_medido || 0, 'nunca medido', 'nunca medidos'), '.') : null);
+    });
+
+    var filas = hist.map(function (u) {
+      var vigente = hilos.some(function (ph) { var v = hist.filter(function (x) { return x.seccion === ph.seccion && x.vigente_desde <= hoy; })[0]; return v && v.id === u.id; });
+      var est = u.vigente_desde > hoy ? h('span', { class: 'chip flag' }, 'programada') : vigente ? h('span', { class: 'chip vig' }, 'vigente') : h('span', { class: 'chip' }, 'reemplazada');
+      return h('tr', null, h('td', null, u.seccion + ' mm²'), h('td', { class: 'num' }, UI.num(u.alerta_mm, 2) + ' mm'), h('td', null, UI.fecha(u.vigente_desde)), h('td', null, est),
+        h('td', null, quien(u.cargado_por, N) || 'Script de la base'), h('td', null, u.nota || ''));
+    });
+
+    ctx.el.replaceChildren(
+      UI.encabezado('Umbrales', 'Con qué valores la base calcula el estado de cada vano. Son los mismos que usan todas las pantallas, los listados y los Excel.'),
+      soloLectura('El límite y la altura del hilo nuevo son fijos por sección. La alerta no se cambia desde la app: un cambio recalcula al instante el estado de todos los vanos, también el de las mediciones viejas, porque la base usa la alerta vigente hoy. Si hace falta cambiarla, se decide con la Coordinación y se carga con un script de la base, con fecha de vigencia y motivo; queda en la Auditoría.'),
+      h('div', { class: 'grilla', style: 'grid-template-columns: repeat(auto-fit, minmax(300px, 1fr))' }, tarjetas),
+      M ? null : UI.mensaje('error', 'No se pudo leer el estado de la red: los conteos por estado no se muestran.'),
+      UI.card('Historial de la alerta', UI.plural(hist.length, 'registro'),
+        h('div', { class: 'tabla-cont' }, h('table', { class: 'tabla' },
+          h('thead', null, h('tr', null, ['Hilo', 'Alerta', 'Vigente desde', 'Estado', 'Cargó', 'Motivo'].map(function (t) { return h('th', null, t); }))),
+          h('tbody', null, filas)))));
+  }
+
+  /* ------------------------------------------------------------------
+   * P15 Planilla de piquetes
+   * ------------------------------------------------------------------ */
+  async function planilla(ctx) {
+    ctx.miga([{ texto: 'Administración', ruta: '#/admin' }, { texto: 'Planilla de piquetes' }]);
+    ctx.el.replaceChildren(UI.encabezado('Planilla de piquetes'), h('div', { class: 'cargando' }, 'Leyendo las planillas…'));
+    var rs = await Promise.all([
+      Conexion.leer('version_piquetes', { columnas: 'id, archivo, fecha, huella, vigente, cargada_por, cargada_en, nota', orden: ['id', false] }),
+      Conexion.leerTodo('medicion', { columnas: 'id, version_piquetes_id, estado' }),
+      Conexion.leer('equivalencia_piquete', { orden: ['id'] }),
+      Conexion.leer('limite_tramo', { orden: ['tramo'] }),
+      nombres()
+    ]);
+    if (!ctx.vigente()) return;
+    var e = err(rs); if (e) { ctx.el.replaceChildren(UI.encabezado('Planilla de piquetes'), UI.mensaje('error', e)); return; }
+    var versiones = rs[0].datos, meds = rs[1].datos, equiv = rs[2].datos, lim = rs[3].datos, N = rs[4];
+    // cantidades de cada versión (solo el conteo, sin bajar filas)
+    var cant = await Promise.all(versiones.map(function (v) {
+      return Promise.all(['piquete', 'canton', 'vano', 'marca'].map(function (t) {
+        return Conexion.leer(t, { columnas: 'id', contar: true, limite: 1, filtros: [['eq', 'version_id', v.id]] }).then(function (r) { return r.error ? null : r.total; });
+      }));
+    }));
+    if (!ctx.vigente()) return;
+
+    function tarjeta(v, i) {
+      var c = cant[i], pub = meds.filter(function (m) { return m.version_piquetes_id === v.id && m.estado === 'publicada'; }).length,
+          anu = meds.filter(function (m) { return m.version_piquetes_id === v.id && m.estado === 'anulada'; }).length;
+      var bot = h('button', { class: 'btn sec chico', type: 'button' }, 'Descargar la planilla original');
+      bot.addEventListener('click', function () { descargar('originales', 'planillas/' + v.huella + '.xlsx', v.archivo, bot); });
+      return UI.card(v.archivo, v.vigente ? 'vigente' : 'versión ' + v.id,
+        h('dl', { class: 'datos' },
+          h('dt', null, 'Estado'), h('dd', null, v.vigente ? h('span', { class: 'chip vig' }, 'vigente') : h('span', { class: 'chip' }, 'reemplazada')),
+          h('dt', null, 'Fecha de la planilla'), h('dd', null, UI.fecha(v.fecha)),
+          h('dt', null, 'Cargada'), h('dd', null, fechaHora(v.cargada_en) + (v.cargada_por ? ' por ' + quien(v.cargada_por, N) : ' (carga inicial o script)')),
+          h('dt', null, 'Contenido'), h('dd', null, c.map(function (x) { return x == null ? '—' : UI.num(x, 0); }).map(function (x, k) { return x + ' ' + ['piquetes', 'cantones', 'vanos', 'marcas'][k]; }).join(' · ')),
+          h('dt', null, 'Mediciones ubicadas con ella'), h('dd', null, UI.plural(pub, 'publicada') + (anu ? ' · ' + UI.plural(anu, 'anulada') + (v.vigente ? '' : ' (reubicadas con la planilla siguiente)') : '')),
+          v.nota ? [h('dt', null, 'Nota'), h('dd', null, v.nota)] : null),
+        h('div', { class: 'acciones', style: 'margin-top:10px' }, bot));
+    }
+
+    var vigente = versiones.filter(function (v) { return v.vigente; })[0];
+    var nomV = {}; versiones.forEach(function (v) { nomV[v.id] = v.archivo; });
+    var tEquiv = equiv.length ? h('div', { class: 'tabla-cont' }, h('table', { class: 'tabla' },
+      h('thead', null, h('tr', null, ['Hoja', 'Vía', 'Progresiva', 'Código anterior', 'Código nuevo', 'Desde la planilla'].map(function (t) { return h('th', null, t); }))),
+      h('tbody', null, equiv.map(function (q) {
+        return h('tr', null, h('td', null, q.recorrido), h('td', null, UI.nombreVia(q.via)), h('td', { class: 'num' }, UI.km(q.progresiva)),
+          h('td', { class: 'vano' }, q.codigo_antes), h('td', { class: 'vano fuerte' }, q.codigo_nuevo), h('td', null, nomV[q.version_nueva] || q.version_nueva));
+      })))) : h('p', { class: 'nota' }, 'Ningún código de piquete cambió entre planillas.');
+    var tLim = lim.length ? h('div', { class: 'tabla-cont' }, h('table', { class: 'tabla' },
+      h('thead', null, h('tr', null, ['Tramo', 'Hoja', 'Vía', 'Desde', 'Hasta', 'km', 'Nota'].map(function (t) { return h('th', null, t); }))),
+      h('tbody', null, lim.map(function (l) {
+        return h('tr', null, h('td', null, 'Tramo ' + l.tramo), h('td', null, l.recorrido), h('td', null, UI.nombreVia(l.via)),
+          h('td', { class: 'vano' }, l.piquete_desde), h('td', { class: 'vano' }, l.piquete_hasta),
+          h('td', { class: 'num' }, UI.num(l.km_desde, 3) + ' a ' + UI.num(l.km_hasta, 3)), h('td', null, l.nota || ''));
+      })))) : h('p', { class: 'nota' }, 'No hay límites cargados (script 11).');
+
+    ctx.el.replaceChildren(
+      UI.encabezado('Planilla de piquetes', 'Con qué planilla se ubica cada medición en los vanos. Hay una sola vigente.'),
+      soloLectura('Una planilla nueva no se carga desde la app: se carga con la herramienta «Planilla nueva» (reubicar_c17.html), que vuelve a ubicar todas las mediciones publicadas desde sus Excel originales y la activa de una sola vez. Antes de usarla tiene que estar corrido el script 16 de la base.'),
+      vigente ? null : UI.mensaje('error', 'No hay ninguna planilla vigente en la base.'),
+      h('div', null, versiones.map(tarjeta)),
+      UI.card('Códigos de piquete que cambiaron', UI.plural(equiv.length, 'código'),
+        h('p', { class: 'nota', style: 'margin:0 0 8px' }, 'Mismo poste (misma hoja, vía y progresiva) con otro código en la planilla nueva. Buscar el código anterior en «Por piquetes» lleva al nuevo.'), tEquiv),
+      UI.card('Límites de los tramos', UI.plural(lim.length, 'límite'),
+        h('p', { class: 'nota', style: 'margin:0 0 8px' }, 'Cada tramo va de un piquete a otro sobre vía principal. Lo que queda afuera (cuadros de estación, puntas, uniones) no entra en los conteos ni en el gráfico del tramo.'), tLim));
+  }
+
+  /* ------------------------------------------------------------------
+   * P16 Auditoría
+   * ------------------------------------------------------------------ */
+  function val(x, N) {
+    if (x == null || x === '') return '—';
+    if (typeof x === 'boolean') return x ? 'Sí' : 'No';
+    if (Array.isArray(x)) return x.join(', ');
+    if (typeof x === 'object') return JSON.stringify(x);
+    var s = String(x);
+    if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s)) return quien(s, N);
+    if (/^\d{4}-\d{2}-\d{2}T/.test(s)) return fechaHora(s);
+    if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return UI.fecha(s);
+    return s;
+  }
+  // campos que cambiaron en un UPDATE: [{campo, antes, despues}]
+  function cambios(a) {
+    var d = a.detalle || {};
+    if (!d.despues || typeof d.despues !== 'object') return [];
+    var an = d.antes || {}, de = d.despues;
+    return Object.keys(de).filter(function (k) { return JSON.stringify(an[k]) !== JSON.stringify(de[k]); })
+      .map(function (k) { return { campo: k, antes: an[k], despues: de[k], sinAntes: !(k in an) }; });
+  }
+  // «campo antes → después»; si el registro no guardó el valor anterior (la función de usuarios guarda solo nombre, perfil y mail), solo el nuevo
+  function cambioTxt(c, N) { return c.sinAntes ? c.campo + ': ' + val(c.despues, N) : c.campo + ' ' + val(c.antes, N) + ' → ' + val(c.despues, N); }
+  function fila(a) { var d = a.detalle || {}; return d.despues || d; }   // la fila como quedó (o la borrada / insertada)
+  function lugar(r) {
+    if (!r || !r.recorrido) return '';
+    var p = r.piquete_desde ? ' ' + r.piquete_desde + (r.piquete_hasta && r.piquete_hasta !== r.piquete_desde ? ' → ' + r.piquete_hasta : '') : '';
+    return ' (' + r.recorrido + ' · ' + UI.nombreVia(r.via || '') + p + ')';
+  }
+  // Qué pasó, en castellano
+  function describir(a, N) {
+    var r = fila(a), ch = cambios(a), campos = ch.map(function (c) { return c.campo; }), d = a.detalle || {}, antes = d.antes || {};
+    function cambio(c) { return campos.indexOf(c) >= 0; }
+    var id = a.registro ? ' N° ' + a.registro : '';
+    switch (a.accion) {
+      case 'USUARIO_ALTA': return 'Dio de alta al usuario ' + (d.mail || '') + ' (' + (PERFIL[d.rol] || d.rol || '') + (d.cargo ? ', ' + (CARGO[d.cargo] || d.cargo) : '') + ').';
+      case 'USUARIO_MODIFICA': return 'Modificó el usuario ' + (antes.mail || quien(a.registro, N) || '') + ': ' + (ch.length ? ch.map(function (c) { return cambioTxt(c, N); }).join('; ') : 'sin cambios') + '.';
+      case 'USUARIO_REINICIA_CLAVE': return 'Reinició la contraseña de ' + (d.mail || quien(a.registro, N) || '') + '.';
+      case 'USUARIO_ACTIVA': return 'Activó al usuario ' + (d.mail || quien(a.registro, N) || '') + '.';
+      case 'USUARIO_DESACTIVA': return 'Dio de baja (desactivó) al usuario ' + (d.mail || quien(a.registro, N) || '') + '.';
+    }
+    var op = a.accion, t = a.tabla;
+    if (t === 'medicion') {
+      var med = 'la medición' + id + ' (' + (r.recorrido || '') + ' · ' + UI.nombreVia(r.via || '') + ' · ' + UI.fecha(r.fecha) + ')';
+      if (op === 'INSERT') return 'Cargó ' + med + ' en borrador' + (r.reemplaza_a ? ', para reemplazar a la N° ' + r.reemplaza_a : '') + '.';
+      if (op === 'DELETE') return 'Borró el borrador de ' + med + '.';
+      if (cambio('estado') && r.estado === 'publicada') return 'Publicó ' + med + '.';
+      if (cambio('estado') && r.estado === 'anulada') return 'Anuló ' + med + '. Motivo: «' + (r.motivo_anulacion || '') + '».';
+      return 'Modificó ' + med + ': ' + campos.join(', ') + '.';
+    }
+    if (t === 'anomalia') {
+      if (cambio('clasificacion')) {
+        var c2 = r.clasificacion === 'sin_revisar' ? 'Deshizo la clasificación de la lectura aislada' + id + ' (estaba «' + (CLASIF[antes.clasificacion] || antes.clasificacion) + '»)'
+          : 'Clasificó la lectura aislada' + id + ' como «' + (CLASIF[r.clasificacion] || r.clasificacion) + '»';
+        return c2 + ' (medición N° ' + r.medicion_id + ', ' + UI.mm(r.valor_min_mm) + ')' + (r.nota ? '. Nota: «' + r.nota + '»' : '') + '.';
+      }
+      return 'Modificó la lectura aislada' + id + ': ' + campos.join(', ') + '.';
+    }
+    if (t === 'verificacion') {
+      var ve = 'la verificación con calibre' + id + lugar(r);
+      if (op === 'INSERT') return 'Cargó ' + ve + ', medida el ' + UI.fecha(r.fecha) + (r.verifico ? ' por ' + r.verifico : '') + '.';
+      if (cambio('anulo_en') && r.anulo_en) return 'Anuló ' + ve + '. Motivo: «' + (r.motivo_anulacion || '') + '».';
+      if (cambio('visto_en') && r.visto_en) return 'Marcó como vista ' + ve + '.';
+      if (cambio('version_piquetes_id')) return 'Pasó ' + ve + ' a la planilla nueva.';
+      return 'Modificó ' + ve + ': ' + campos.join(', ') + '.';
+    }
+    if (t === 'evento_hilo') {
+      var tipo = TIPO_EV[r.tipo] || r.tipo, ev = (r.origen === 'sugerido' ? 'el posible ' : 'la intervención «') + tipo + (r.origen === 'sugerido' ? '' : '»') + id + lugar(r);
+      if (op === 'INSERT') return r.origen === 'sugerido' ? 'La carga registró un posible ' + tipo + id + lugar(r) + ', a confirmar.' : 'Cargó ' + ev + (r.fecha ? ', del ' + UI.fecha(r.fecha) : '') + '.';
+      if (cambio('anulo_en') && r.anulo_en) return 'Anuló ' + ev + '. Motivo: «' + (r.motivo_anulacion || '') + '».';
+      if (cambio('confirmado_por') && r.confirmado_por) return 'Confirmó ' + ev + '.';
+      if (cambio('descartado_por') && r.descartado_por) return 'Descartó ' + ev + '.';
+      if (cambio('visto_en') && r.visto_en) return 'Marcó como vista ' + ev + '.';
+      return (op === 'DELETE' ? 'Borró ' : 'Modificó ') + ev + (op === 'DELETE' ? '.' : ': ' + campos.join(', ') + '.');
+    }
+    if (t === 'pedido_verificacion') {
+      var pe = 'el pedido de verificación' + id + lugar(r);
+      if (op === 'INSERT') return 'Pidió verificar en campo' + lugar(r) + ' (pedido' + id + ')' + (r.nota ? ': «' + r.nota + '»' : '') + '.';
+      if (cambio('estado') && r.estado === 'cerrado') return (r.cierre === 'calibre' ? 'Se cerró solo ' + pe + ': todos los vanos medidos con calibre' : 'Cerró ' + pe + ' sin cargar la verificación') + (r.motivo_cierre ? '. Motivo: «' + r.motivo_cierre + '»' : '') + '.';
+      if (cambio('estado') && r.estado === 'cancelado') return 'Canceló ' + pe + '. Motivo: «' + (r.motivo_cierre || '') + '».';
+      if (cambio('estado') && r.estado === 'pendiente') return 'Se reabrió ' + pe + ': se anuló una verificación y vuelven a faltar vanos.';
+      return 'Modificó ' + pe + ': ' + campos.join(', ') + '.';
+    }
+    if (t === 'perfil') {
+      var us = 'el usuario ' + (r.mail || r.nombre || quien(a.registro, N) || '');
+      if (op === 'UPDATE' && campos.length && campos.every(function (c) { return c === 'debe_cambiar_clave' || c === 'actualizado_en'; }) && r.debe_cambiar_clave === false) return (r.nombre || 'El usuario') + ' cambió su contraseña provisoria.';
+      if (op === 'INSERT') return 'Perfil creado para ' + us + ' (' + (PERFIL[r.rol] || r.rol) + ').';
+      if (op === 'DELETE') return 'Perfil borrado: ' + us + '.';
+      return 'Perfil de ' + us + ' modificado: ' + ch.map(function (c) { return cambioTxt(c, N); }).join('; ') + '.';
+    }
+    if (t === 'umbral') {
+      if (op === 'INSERT') return 'Cargó la alerta de ' + UI.num(r.alerta_mm, 2) + ' mm para el hilo de ' + r.seccion + ' mm², vigente desde el ' + UI.fecha(r.vigente_desde) + (r.nota ? ' («' + r.nota + '»)' : '') + '.';
+      return (op === 'DELETE' ? 'Borró' : 'Modificó') + ' la alerta' + id + ' del hilo de ' + r.seccion + ' mm²' + (op === 'UPDATE' ? ': ' + ch.map(function (c) { return cambioTxt(c, N); }).join('; ') : '') + '.';
+    }
+    if (t === 'version_piquetes') {
+      var pl = 'la planilla «' + (r.archivo || '') + '»';
+      if (op === 'INSERT') return 'Cargó ' + pl + (r.vigente ? ' como vigente' : ' (todavía no vigente)') + '.';
+      if (cambio('vigente')) return r.vigente ? 'Pasó a vigente ' + pl + '.' : 'Dejó de ser vigente ' + pl + '.';
+      return (op === 'DELETE' ? 'Borró ' : 'Modificó ') + pl + (op === 'DELETE' ? '.' : ': ' + campos.join(', ') + '.');
+    }
+    if (t === 'archivo_fuente') return op === 'INSERT' ? 'Registró el Excel «' + (r.nombre || '') + '».' : (op === 'DELETE' ? 'Borró' : 'Modificó') + ' el Excel registrado «' + (r.nombre || '') + '».';
+    if (t === 'limite_tramo') return (op === 'INSERT' ? 'Cargó' : op === 'DELETE' ? 'Borró' : 'Modificó') + ' el límite del tramo ' + r.tramo + ' (' + (r.recorrido || '') + ' · ' + UI.nombreVia(r.via || '') + ': ' + (r.piquete_desde || '') + ' → ' + (r.piquete_hasta || '') + ').';
+    if (t === 'cambio_seccion') return (op === 'INSERT' ? 'Cargó' : op === 'DELETE' ? 'Borró' : 'Modificó') + ' un cambio de sección ' + r.de_seccion + ' → ' + r.a_seccion + ' mm² (' + (r.recorrido || '') + ' · ' + UI.nombreVia(r.via || '') + ', ' + UI.km(r.km) + ').';
+    if (t === 'zona_sin_lectura') return (op === 'INSERT' ? 'Cargó' : op === 'DELETE' ? 'Borró' : 'Modificó') + ' una zona sin lectura (' + (r.recorrido || '') + ', km ' + UI.num(r.km_desde, 3) + ' a ' + UI.num(r.km_hasta, 3) + ').';
+    if (t === 'aviso') return (op === 'INSERT' ? 'Cargó' : op === 'DELETE' ? 'Borró' : 'Modificó') + ' un aviso' + (r.texto ? ': «' + r.texto + '»' : '') + '.';
+    return op + ' en ' + t + id + '.';
+  }
+  function quienHizo(a, N) {
+    if (a.usuario) return quien(a.usuario, N);
+    if (a.tabla === 'perfil') return 'Registro automático';
+    return 'Sin usuario (script o carga inicial)';
+  }
+
+  async function auditoria(ctx) {
+    ctx.miga([{ texto: 'Administración', ruta: '#/admin' }, { texto: 'Auditoría' }]);
+    var q = ctx.query || {};
+    var f = { grupo: q.grupo || '', usuario: q.usuario || '', desde: q.desde || '', hasta: q.hasta || '', registro: q.registro || '', automaticos: q.auto === '1' };
+    ctx.el.replaceChildren(UI.encabezado('Auditoría'), h('div', { class: 'cargando' }, 'Leyendo la auditoría…'));
+    var N = await nombres();
+    if (!ctx.vigente()) return;
+    if (N.error) { ctx.el.replaceChildren(UI.encabezado('Auditoría'), UI.mensaje('error', N.error)); return; }
+
+    // ---- filtros
+    var selG = h('select', { id: 'au-grupo' }, GRUPOS.map(function (g) { return h('option', { value: g.k, selected: g.k === f.grupo ? true : null }, g.t); }));
+    var selU = h('select', { id: 'au-usuario' }, [h('option', { value: '' }, 'Todos'), h('option', { value: 'ninguno', selected: f.usuario === 'ninguno' ? true : null }, 'Sin usuario (scripts, carga inicial)')]
+      .concat(N.lista.map(function (p) { return h('option', { value: p.id, selected: p.id === f.usuario ? true : null }, p.nombre + (p.activo ? '' : ' (dado de baja)')); })));
+    var inD = h('input', { type: 'date', id: 'au-desde', value: f.desde }), inH = h('input', { type: 'date', id: 'au-hasta', value: f.hasta });
+    var inR = h('input', { type: 'search', id: 'au-registro', placeholder: 'N° de registro (ej. 57)', inputmode: 'numeric', value: f.registro, style: 'min-width:0;width:170px' });
+    var chkA = h('input', { type: 'checkbox', id: 'au-auto', checked: f.automaticos ? true : null });
+    var lista = h('ul', { class: 'au-lista' }), pie = h('div'), total = h('small');
+    var leidos = [], hayMas = false, turno = 0;   // turno: si cambian los filtros mientras se lee, la respuesta vieja se descarta
+
+    function aplicar() {
+      f.grupo = selG.value; f.usuario = selU.value; f.desde = inD.value; f.hasta = inH.value; f.registro = inR.value.trim(); f.automaticos = chkA.checked;
+      var p = []; if (f.grupo) p.push('grupo=' + f.grupo); if (f.usuario) p.push('usuario=' + f.usuario); if (f.desde) p.push('desde=' + f.desde);
+      if (f.hasta) p.push('hasta=' + f.hasta); if (f.registro) p.push('registro=' + encodeURIComponent(f.registro)); if (f.automaticos) p.push('auto=1');
+      history.replaceState(null, '', '#/admin/auditoria' + (p.length ? '?' + p.join('&') : ''));
+      leidos = []; leer(true);
+    }
+    [selG, selU, inD, inH, chkA].forEach(function (x) { x.addEventListener('change', aplicar); });
+    var tR = null; inR.addEventListener('input', function () { clearTimeout(tR); tR = setTimeout(aplicar, 400); });
+
+    function consulta(cols, contar) {
+      var x = Conexion.cliente.from('auditoria').select(cols, contar ? { count: 'exact' } : undefined);
+      var g = GRUPOS.filter(function (gg) { return gg.k === f.grupo; })[0];
+      if (g && g.tablas) x = x.in('tabla', g.tablas);
+      if (f.usuario === 'ninguno') x = x.is('usuario', null); else if (f.usuario) x = x.eq('usuario', f.usuario);
+      if (f.desde) x = x.gte('fecha', f.desde + 'T00:00:00-03:00');
+      if (f.hasta) x = x.lte('fecha', f.hasta + 'T23:59:59.999-03:00');
+      if (f.registro) x = x.eq('registro', f.registro);
+      // los cambios de usuarios hechos por la función quedan dos veces: el renglón del administrador y el automático de la tabla perfil
+      if (!f.automaticos) x = x.or('tabla.neq.perfil,usuario.not.is.null');
+      return x.order('id', { ascending: false });
+    }
+    async function leer(primero) {
+      var mio = primero ? ++turno : turno;
+      pie.replaceChildren(h('div', { class: 'cargando' }, 'Leyendo…'));
+      if (primero) { lista.replaceChildren(); total.textContent = ''; }
+      var r = await consulta('id, fecha, usuario, accion, tabla, registro, detalle', primero).range(leidos.length, leidos.length + POR_PAGINA - 1);
+      if (!ctx.vigente() || mio !== turno) return;
+      if (r.error) { pie.replaceChildren(UI.mensaje('error', Conexion.traducirError(r.error))); return; }
+      if (primero) total.textContent = UI.plural(r.count || 0, 'registro');
+      leidos = leidos.concat(r.data); hayMas = r.data.length === POR_PAGINA;
+      r.data.forEach(function (a) { lista.appendChild(item(a)); });
+      if (!leidos.length) pie.replaceChildren(h('p', { class: 'nota' }, 'No hay registros con estos filtros.'));
+      else if (hayMas) { var b = h('button', { class: 'btn sec', type: 'button' }, 'Ver ' + POR_PAGINA + ' más'); b.addEventListener('click', function () { leer(false); }); pie.replaceChildren(b); }
+      else pie.replaceChildren(h('p', { class: 'nota' }, 'Son todos.'));
+    }
+    function item(a) {
+      var det = h('div', { class: 'au-det', hidden: true });
+      var ver = h('button', { class: 'btn lnk chico', type: 'button', 'aria-expanded': 'false' }, 'Detalle');
+      ver.addEventListener('click', function () {
+        var abrir = det.hidden; det.hidden = !abrir; ver.setAttribute('aria-expanded', String(abrir)); ver.textContent = abrir ? 'Ocultar' : 'Detalle';
+        if (abrir && !det.firstChild) det.appendChild(detalle(a));
+      });
+      return h('li', { class: 'au-it' + (a.usuario ? '' : ' auto') },
+        h('div', { class: 'au-cab' }, h('span', { class: 'au-f' }, fechaHora(a.fecha)), h('b', null, quienHizo(a, N)), h('span', { class: 'chip' }, TABLA[a.tabla] || a.tabla), ver),
+        h('div', { class: 'au-que' }, describir(a, N)), det);
+    }
+    function detalle(a) {
+      var ch = cambios(a), r = fila(a);
+      var meta = h('p', { class: 'nota', style: 'margin:0 0 6px' }, 'Registro de auditoría N° ' + a.id + ' · tabla ' + a.tabla + ' · ' + a.accion + (a.registro ? ' · registro ' + a.registro : ''));
+      if (ch.length) return h('div', null, meta, h('div', { class: 'tabla-cont' }, h('table', { class: 'tabla' },
+        h('thead', null, h('tr', null, h('th', null, 'Dato'), h('th', null, 'Antes'), h('th', null, 'Después'))),
+        h('tbody', null, ch.map(function (c) { return h('tr', null, h('td', null, c.campo), h('td', null, c.sinAntes ? 'no registrado' : val(c.antes, N)), h('td', { class: 'fuerte' }, val(c.despues, N))); })))));
+      var claves = r && typeof r === 'object' ? Object.keys(r).filter(function (k) { return r[k] != null && r[k] !== ''; }) : [];
+      return h('div', null, meta, claves.length ? h('dl', { class: 'datos' }, claves.map(function (k) { return [h('dt', null, k), h('dd', null, val(r[k], N))]; })) : h('p', { class: 'nota' }, 'Sin detalle.'));
+    }
+
+    var exp = h('button', { class: 'btn sec chico', type: 'button' }, 'Exportar a Excel');
+    exp.addEventListener('click', async function () {
+      exp.disabled = true; var t = exp.textContent; exp.textContent = 'Preparando…';
+      try {
+        var todo = [], desde = 0;
+        for (;;) {
+          var r = await consulta('id, fecha, usuario, accion, tabla, registro, detalle').range(desde, desde + 999);
+          if (r.error) throw new Error(Conexion.traducirError(r.error));
+          todo = todo.concat(r.data); if (r.data.length < 1000 || todo.length >= 20000) break; desde += 1000;
+        }
+        var g = GRUPOS.filter(function (gg) { return gg.k === f.grupo; })[0];
+        var nombre = await Exportar.excel('auditoria', [{ nombre: 'Auditoría',
+          encabezado: ['Auditoría de la plataforma de desgaste (Geismar 201, Línea Roca) · generado el ' + fechaHora(new Date().toISOString()),
+            'Filtros: ' + (g ? g.t : 'Todo') + (f.usuario ? ' · usuario ' + (f.usuario === 'ninguno' ? 'sin usuario' : quien(f.usuario, N)) : '') + (f.desde ? ' · desde ' + UI.fecha(f.desde) : '') + (f.hasta ? ' · hasta ' + UI.fecha(f.hasta) : '') + (f.registro ? ' · registro ' + f.registro : '') + (todo.length >= 20000 ? ' · (cortado en 20.000 renglones)' : '')],
+          columnas: [{ t: 'N°', tipo: 'num', dec: 0, ancho: 8 }, { t: 'Fecha y hora', ancho: 17 }, { t: 'Quién', ancho: 24 }, { t: 'Sección', ancho: 18 }, { t: 'Qué pasó', ancho: 90 }, { t: 'Datos que cambiaron', ancho: 60 }],
+          filas: todo.map(function (a) {
+            return [a.id, fechaHora(a.fecha), quienHizo(a, N), TABLA[a.tabla] || a.tabla, describir(a, N),
+              cambios(a).map(function (c) { return cambioTxt(c, N); }).join(' | ')];
+          }) }]);
+        UI.toast('Descargado: ' + nombre);
+      } catch (e) { UI.toast('No se pudo exportar: ' + ((e && e.message) || e)); }
+      finally { exp.disabled = false; exp.textContent = t; }
+    });
+
+    ctx.el.replaceChildren(
+      UI.encabezado('Auditoría', 'Quién hizo qué y cuándo: cargas, publicaciones, anulaciones, clasificaciones, calibre, intervenciones, pedidos, usuarios y configuración.'),
+      soloLectura('La auditoría la escribe la base sola en cada cambio; nadie la puede modificar ni borrar desde la app. Lo hecho con un script de la base (SQL Editor) o en la carga inicial figura «sin usuario».'),
+      UI.card(null, null,
+        h('div', { class: 'filtros' },
+          h('label', null, h('span', { class: 'nota' }, 'Qué'), selG),
+          h('label', null, h('span', { class: 'nota' }, 'Quién'), selU),
+          h('label', null, h('span', { class: 'nota' }, 'Desde'), inD),
+          h('label', null, h('span', { class: 'nota' }, 'Hasta'), inH),
+          h('label', null, h('span', { class: 'nota' }, 'Registro'), inR)),
+        h('label', { class: 'nota', style: 'display:flex;gap:6px;align-items:center;margin-top:8px' }, chkA,
+          'Mostrar también los registros automáticos de usuarios (repiten lo que hizo el administrador en Usuarios)')),
+      UI.card('Registros', null, h('div', { class: 'acciones', style: 'justify-content:space-between;align-items:center;margin-bottom:8px' }, total, exp), lista, pie));
+    leer(true);
+  }
+
+  Rutas.definir('/admin/umbrales', { pantalla: umbrales, titulo: 'Umbrales', pestana: 'admin', requiere: 'admin' });
+  Rutas.definir('/admin/planilla', { pantalla: planilla, titulo: 'Planilla de piquetes', pestana: 'admin', requiere: 'admin' });
+  Rutas.definir('/admin/auditoria', { pantalla: auditoria, titulo: 'Auditoría', pestana: 'admin', requiere: 'admin' });
+  window.PantallaAdministracion = { describir: describir, cambios: cambios };   // para las pruebas
+})();
 </script>
 <script>/* js/app.js */
 /* =====================================================================
