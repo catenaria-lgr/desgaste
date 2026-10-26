@@ -589,6 +589,13 @@ table.rd-t { border-collapse: collapse; width: 100%; font-size: 13.5px; font-var
 .cg-mal { color: var(--crit); font-weight: 500; }
 .cg-sig { margin-top: 10px; }
 @media (prefers-reduced-motion: reduce) { .cg-barra i { transition: none; } }
+/* c37: mediciones ya publicadas que cambian con un informe re-emitido o un complemento */
+.cg-reemp { margin-top: 14px; border: 1px solid #f0d58a; background: #fffaf0; border-radius: 10px; padding: 12px 14px; }
+.cg-reemp h3 { font-size: 15px; font-weight: 500; margin: 0 0 8px; }
+.cg-reemp-it { padding: 8px 0; border-top: 1px solid #f0e4c4; overflow-wrap: anywhere; }
+.cg-reemp-it:first-of-type { border-top: 0; }
+.cg-reemp-it p { margin: 4px 0 0; font-size: 14px; }
+.cg-reemp .cg-check { margin: 10px 0 0; }
 
 
 /* c38: carteles del gráfico sobre tramo neutro y cambio de sección */
@@ -2927,7 +2934,7 @@ function elegirRecorrido(P, I) {
 }
 
 if (typeof module !== "undefined") module.exports = { combinadas: combinadas, elegirRecorrido: elegirRecorrido, PERFIL: PERFIL, REGLAS: REGLAS, parsePiquetes: parsePiquetes, parseInforme: parseInforme,
-  procesarCampania: procesarCampania, normCodigo: normCodigo };
+  procesarCampania: procesarCampania, normCodigo: normCodigo, limpiarSerie: limpiarSerie };
 
 
 </script>
@@ -2962,6 +2969,9 @@ if (typeof module !== "undefined") module.exports = { combinadas: combinadas, el
  * c06 (20/10/2026): pantalla «Carga de medición» de la app. planificar() acepta opciones.origen (texto de observaciones)
  *   y opciones.etiquetaEvento (nota de los posibles reemplazos). ejecutar() deja cargar a un OPERADOR cuando la planilla
  *   del plan ya es la vigente (solo suma mediciones); cargar o rehacer una planilla sigue siendo solo de administradores.
+ * c37 (25/10/2026): opciones.excluir = { 'recorrido|vía|fecha': [huellas] }: Excel que NO aportan a esa medición porque los
+ *   reemplazó un informe re-emitido. Se arma con excluidosDe(mediciones publicadas) a partir de la marca «[c37 excluye: huella]»
+ *   de las observaciones, para que la planilla nueva (c17) y la recarga (c45–c47) no vuelvan a mezclar el informe viejo.
  * ===================================================================== */
 (function (global) {
   'use strict';
@@ -3038,6 +3048,7 @@ if (typeof module !== "undefined") module.exports = { combinadas: combinadas, el
         if (!c.x.length) return;
         var Rc = core.procesarCampania(c, vanos, I.seccion);
         var k = R.hoja + '|' + I.via + '|' + c.fecha;
+        if (o.excluir && o.excluir[k] && o.excluir[k].indexOf(inf.huella) >= 0) return;   // c37: lo reemplazó un informe re-emitido
         var g = grupos[k] = grupos[k] || { recorrido: R.hoja, via: I.via, fecha: c.fecha, etiqueta: '', fuentes: [] };
         var et = String(c.etiqueta || '').trim();
         if (/^\d*$/.test(et)) et = ''; // «Ø LC1 23-03-2021» deja un «1» suelto: no es una etiqueta
@@ -3102,7 +3113,8 @@ if (typeof module !== "undefined") module.exports = { combinadas: combinadas, el
         (fuentes.length > 1 ? 'Fuentes: ' + fuentes.join(' · ') + ' (archivo vinculado: ' + principal.archivo + '). ' : 'Fuente: ' + principal.archivo + '. ') +
         (principal.esActual ? '' : 'La medición se tomó de la columna «medición anterior» del informe (no hay informe propio). ') +
         'Ubicada con la planilla ' + plan.planilla.nombre + '; el informe original usó: ' + versInf.join(' / ') + '.' +
-        (avisosImp.length ? ' Avisos del importador: ' + avisosImp.join(' ') : '');
+        (avisosImp.length ? ' Avisos del importador: ' + avisosImp.join(' ') : '') +
+        (o.excluir && o.excluir[k] ? o.excluir[k].map(function (h) { return ' [c37 excluye: ' + h + ']'; }).join('') : '');   // c37: la marca pasa a la versión nueva
       plan.mediciones.push({
         clave: k, recorrido: g.recorrido, via: g.via, fecha: g.fecha, etiqueta: g.etiqueta || null, seccion: secs[0], tramos: tramos,
         km_inicio: r5(kmIni), km_fin: r5(kmFin), archivoPrincipal: principal.huella, archivos: uniq(g.fuentes.map(function (f) { return f.huella; })),
@@ -3410,11 +3422,382 @@ if (typeof module !== "undefined") module.exports = { combinadas: combinadas, el
     return { checks: ch, ok: ch.every(function (c) { return c.ok; }), faltan: faltan };
   }
 
-  var api = { planificar: planificar, ejecutar: ejecutar, verificar: verificar, VERSION: VERSION_CARGA };
+  // c37: Excel excluidos por medición, leídos de las observaciones de las publicadas («[c37 excluye: huella]»)
+  function excluidosDe(mediciones) {
+    var ex = {};
+    (mediciones || []).forEach(function (m) {
+      var re = /\[c37 excluye: ([0-9a-f]{64})\]/g, x;
+      while ((x = re.exec(m.observaciones || ''))) { var k = m.recorrido + '|' + m.via + '|' + m.fecha; (ex[k] = ex[k] || []).push(x[1]); }
+    });
+    return ex;
+  }
+
+  var api = { planificar: planificar, ejecutar: ejecutar, verificar: verificar, excluidosDe: excluidosDe, claveVano: claveVano, VERSION: VERSION_CARGA };
   if (typeof module !== 'undefined' && module.exports) module.exports = api; else global.CargaBase = api;
 })(typeof window !== 'undefined' ? window : this);
 
 
+</script>
+<script type="text/plain" data-vendor="../importador/controles.js">/* ../importador/controles.js (diferida: no se ejecuta al abrir) */
+/* =====================================================================
+ * controles.js — Controles de formato y de sentido de un informe antes de cargarlo (tarea c37, 25/10/2026)
+ * Plataforma de desgaste de catenaria · Línea Roca · Geismar 201
+ *
+ * Funciona en el navegador (global Controles) y en Node (module.exports). No habla con la base.
+ *
+ *   var r = Controles.revisar(core, P, inf, { hoy: '2026-10-25' })
+ *       inf = { nombre, I: core.parseInforme(libro, nombre) }
+ *       r   = { errores: [texto], avisos: [texto], datos: {...} }      // un error impide cargar ESE informe
+ *   var d = Controles.desfase(campania, serieAnterior)
+ *       campania = { x: [km], y: [mm] } (columna del informe) · serieAnterior = grilla de 0,5 m guardada (serie.js)
+ *       d = { metros, ventanas, correlacion } | null (no se pudo estimar)
+ *
+ * Qué controla (pendientes de c06; relevamiento §10.4):
+ *   formato   · hojas, encabezados «Prog» + «Ø LC fecha», columnas casi vacías, paso entre lecturas, umbrales del archivo
+ *   valores   · lecturas bajo 5 mm (imposibles para un hilo en uso) y sobre el hilo nuevo + 1 %
+ *   ubicación · lecturas fuera del rango de km de la planilla; piquetes del informe que no existen o tienen otra progresiva
+ *   fecha     · futura o anterior a 2021; fecha del nombre del archivo distinta de la columna actual
+ *   estructura· huecos de más de 3 m y rellenos con 15,49 (no medido), como la conciliación de c46
+ *   desfase   · corrimiento contra la medición anterior de esa zona (aviso si pasa de 5 m, §10.6 de la info técnica)
+ * Umbral de error: más del 10 % de las lecturas fuera de rango, o fecha imposible, o ninguna lectura en la planilla.
+ * ===================================================================== */
+(function (global) {
+  'use strict';
+  var MIN_MM = 5;            // por debajo, imposible para un hilo en uso (límite 7,5 / 8,5)
+  var ERROR_FRAC = 0.10;     // más del 10 % de lecturas imposibles = no es un informe de desgaste bien procesado
+  var HUECO_M = 3;           // hueco entre lecturas que se informa (control A de c46)
+  var DESFASE_AVISO_M = 5;   // §10.6 de la info técnica
+  var PRIMERA_FECHA = '2021-01-01';
+
+  function f1(v) { return (Math.round(v * 10) / 10).toLocaleString('es-AR'); }
+  function f3(v) { return v.toLocaleString('es-AR', { minimumFractionDigits: 3, maximumFractionDigits: 3 }); }
+  function fecha(iso) { var p = String(iso).split('-'); return p[2] + '-' + p[1] + '-' + p[0]; }
+  function pct(a, b) { return b ? Math.round(a / b * 1000) / 10 : 0; }
+
+  function revisar(core, P, inf, opciones) {
+    var o = opciones || {}, I = inf.I, errores = [], avisos = [], datos = {};
+    var hoy = o.hoy || new Date().toISOString().slice(0, 10);
+    var perf = core.PERFIL[I.seccion];
+    // ---------- formato ----------
+    if (!I.campanias.length) errores.push('«Datos Filtrado» no tiene columnas de medición con fecha («Prog» seguida de «Ø LC dd-mm-aaaa»): no parece un informe de desgaste procesado.');
+    if (!perf) errores.push('No se pudo leer la sección del hilo en RESUMEN (encontrado: ' + (I.seccion == null ? 'nada' : I.seccion) + '; tiene que ser 170 o 110).');
+    if (!I.via) errores.push('No se pudo saber la vía: el título no la dice y no hay columna de piquetes.');
+    if (!I.cantonesInforme.length) avisos.push('RESUMEN no tiene las filas «Km Inicial» / «Km Final» de los cantones: el formato es distinto al de siempre. Revisá la vista previa con cuidado.');
+    if (perf && I.umbralesArchivo) {
+      var u = I.umbralesArchivo;
+      if (Math.abs(u.limite - perf.limite) > 0.001 || Math.abs(u.alerta - perf.alerta) > 0.001 || Math.abs(u.nominal - perf.nominal) > 0.011)
+        avisos.push('El informe trae umbrales distintos a los de la app (límite ' + u.limite + ' · alerta ' + u.alerta + ' · nominal ' + u.nominal + '; la app usa ' +
+          perf.limite + ' · ' + perf.alerta + ' · ' + perf.nominal + ' para ' + I.seccion + ' mm²). El estado se calcula con los de la app.');
+    }
+    if (!I.campanias.length || !perf || !I.via) return { errores: errores, avisos: avisos, datos: datos };
+
+    var fechas = I.campanias.map(function (c) { return c.fecha; }).sort();
+    var actual = I.campanias.filter(function (c) { return c.fecha === fechas[fechas.length - 1]; })[0];
+    datos.fechaActual = actual.fecha;
+
+    // ---------- fecha ----------
+    I.campanias.forEach(function (c) {
+      if (c.fecha > hoy) errores.push('La columna ' + c.columna + ' tiene fecha ' + fecha(c.fecha) + ', posterior a hoy: revisá el encabezado.');
+      else if (c.fecha < PRIMERA_FECHA) errores.push('La columna ' + c.columna + ' tiene fecha ' + fecha(c.fecha) + ', anterior a las primeras mediciones del Geismar (2021): revisá el encabezado.');
+    });
+    var mn = /(\d{1,2})[-_. ](\d{1,2})[-_. ](\d{4})/.exec(inf.nombre || '');
+    if (mn) {
+      var fn = mn[3] + '-' + ('0' + mn[2]).slice(-2) + '-' + ('0' + mn[1]).slice(-2);
+      if (fn !== actual.fecha && !I.campanias.some(function (c) { return c.fecha === fn; }))
+        avisos.push('El nombre del archivo dice ' + fecha(fn) + ' y la medición más nueva de adentro es del ' + fecha(actual.fecha) + '. Se carga con la fecha de adentro.');
+    }
+
+    // ---------- ubicación: rango de la planilla ----------
+    var R = core.elegirRecorrido(P, I);
+    if (!R) { errores.push('Ninguna lectura cae en la planilla vigente para la ' + (I.via === 'ASC' ? 'vía ascendente' : I.via === 'DESC' ? 'vía descendente' : I.via) + '.'); return { errores: errores, avisos: avisos, datos: datos }; }
+    datos.hoja = R.hoja;
+    var vh = P.vanos.filter(function (v) { return v.hoja === R.hoja && v.via === I.via; });
+    var kLo = Math.min.apply(null, vh.map(function (v) { return v.km_inicio; })), kHi = Math.max.apply(null, vh.map(function (v) { return v.km_fin; }));
+
+    // ---------- valores, rango, huecos, relleno (por columna) ----------
+    I.campanias.forEach(function (c) {
+      var n = c.x.length, conValor = 0, bajos = [], altos = 0, fuera = 0, huecos = 0, huecoM = 0, ceros = 0;
+      for (var i = 0; i < n; i++) {
+        var y = c.y[i];
+        if (c.x[i] < kLo - 0.05 || c.x[i] > kHi + 0.05) fuera++;
+        if (i && (c.x[i] - c.x[i - 1]) * 1000 > HUECO_M) { huecos++; huecoM += (c.x[i] - c.x[i - 1]) * 1000; }
+        if (y === null || y === 0) { ceros++; continue; }
+        conValor++;
+        if (y < MIN_MM) bajos.push(i); else if (y > perf.nominal * (1 + core.REGLAS.toleranciaNominal)) altos++;
+      }
+      var et = 'Columna ' + c.columna + ' (' + fecha(c.fecha) + ')';
+      if (n < 100) { errores.push(et + ': solo ' + n + ' lecturas. Parece una columna vacía o cortada.'); return; }
+      var malas = bajos.length + altos;
+      if (conValor && malas / conValor > ERROR_FRAC)
+        errores.push(et + ': ' + pct(malas, conValor) + ' % de las lecturas son imposibles (bajo ' + MIN_MM + ' mm o sobre el hilo nuevo). Revisá la sección configurada (' + I.seccion + ' mm²) y el procesamiento.');
+      else {
+        if (bajos.length) avisos.push(et + ': ' + bajos.length + ' lectura' + (bajos.length === 1 ? '' : 's') + ' bajo ' + MIN_MM + ' mm (primera en km ' + f3(c.x[bajos[0]]) + ': ' + c.y[bajos[0]] + ' mm). Entran en el mínimo del vano como cualquier lectura: si es un error, se clasifica en Revisión.');
+        if (altos) avisos.push(et + ': ' + altos + ' lectura' + (altos === 1 ? '' : 's') + ' sobre el hilo nuevo + 1 % (más de ' + f3(perf.nominal * 1.01) + ' mm): se descartan como inválidas.');
+      }
+      if (fuera === n && c === actual) errores.push(et + ': ninguna lectura cae dentro de la hoja «' + R.hoja + '» de la planilla (km ' + f3(kLo) + '–' + f3(kHi) + ').');
+      else if (fuera / n > 0.05 && c === actual) avisos.push(et + ': ' + pct(fuera, n) + ' % de las lecturas cae fuera de la hoja «' + R.hoja + '» (km ' + f3(kLo) + '–' + f3(kHi) + '): no se ubican en ningún vano.');
+      if (c === actual) {
+        var L = core.limpiarSerie ? core.limpiarSerie(c.x, c.y, I.seccion) : null, relM = 0;
+        if (L) for (var k = 1; k < n; k++) if (L.estado[k] === 'relleno' && L.estado[k - 1] === 'relleno') relM += (c.x[k] - c.x[k - 1]) * 1000;
+        datos.km = [c.x[0], c.x[n - 1]]; datos.lecturas = n; datos.huecos = huecos; datos.rellenoM = relM;
+        if (relM > 100) avisos.push(et + ': ' + f1(relM / 1000) + ' km con 15,49 constante (no medido, relleno). Esos vanos no cuentan como medidos.');
+        if (huecos && huecoM > 200) avisos.push(et + ': ' + huecos + ' hueco' + (huecos === 1 ? '' : 's') + ' de más de ' + HUECO_M + ' m sin lectura (' + f1(huecoM) + ' m en total).');
+      }
+    });
+
+    // ---------- piquetes del informe contra la planilla ----------
+    if (I.piquetesInforme.length) {
+      var porCod = {}, otraVia = {};
+      P.piquetes.forEach(function (p) { if (p.hoja === R.hoja) { if (p.via === I.via) porCod[p.codigo] = p; else otraVia[p.codigo] = 1; } });
+      var noEsta = [], viejo = 0, difs = [], deOtra = 0;
+      I.piquetesInforme.forEach(function (p) {
+        var q = porCod[p.codigo];
+        if (!q) {
+          var alt = /^5-(2[5-9])-/.test(p.codigo) ? porCod['15-' + p.codigo.slice(2)] : null;   // 5-25…5-29 → 15-25…15-29 (s07)
+          if (alt) { viejo++; q = alt; } else { if (otraVia[p.codigo]) deOtra++; noEsta.push(p.codigo); return; }
+        }
+        if (q.progresiva != null && Math.abs(q.progresiva - p.progresiva) * 1000 > 1) difs.push(Math.abs(q.progresiva - p.progresiva) * 1000);
+      });
+      datos.piquetes = { informe: I.piquetesInforme.length, noEstan: noEsta.length, codigoViejo: viejo, progresivaDistinta: difs.length };
+      if (viejo) avisos.push(viejo + ' piquetes del informe usan el código viejo 5-25… a 5-29… (en la planilla son 15-…). No afecta: las lecturas se ubican por progresiva.');
+      if (noEsta.length && deOtra > noEsta.length / 2) avisos.push('La columna de piquetes del informe tiene los de la otra vía (' + deOtra + ' de ' + I.piquetesInforme.length + '). No afecta: las lecturas se ubican por progresiva, pero conviene avisarlo al procesamiento de datos.');
+      else if (noEsta.length) avisos.push(noEsta.length + ' piquete' + (noEsta.length === 1 ? '' : 's') + ' del informe no existe' + (noEsta.length === 1 ? '' : 'n') + ' en la planilla vigente (por ejemplo ' + noEsta.slice(0, 3).join(', ') + ').');
+      if (difs.length) avisos.push(difs.length + ' piquete' + (difs.length === 1 ? '' : 's') + ' del informe tiene' + (difs.length === 1 ? '' : 'n') + ' otra progresiva que en la planilla vigente (hasta ' + f1(Math.max.apply(null, difs)) + ' m)' +
+        (I.versionPiquetes ? '; el informe dice que usó la planilla ' + I.versionPiquetes : '') + '. Las lecturas se ubican con la progresiva del informe sobre la planilla vigente: si la diferencia es grande, pedí que se reprocese con la planilla vigente.');
+    }
+    return { errores: errores, avisos: avisos, datos: datos };
+  }
+
+  // ---------- desfase contra la medición anterior (grilla de 0,5 m guardada) ----------
+  // Por ventanas de 1 km: corrimiento de −20 a +20 m (paso 0,5 m) que maximiza la correlación de las alturas.
+  // Se toman las ventanas con correlación ≥ 0,6 y se informa la mediana. Con alturas muy parejas no hay señal: null.
+  function grillaDe(c) {
+    // la columna del informe a la grilla de 0,5 m: mínimo por celda (igual criterio que la serie guardada)
+    var km0 = Math.floor(c.x[0] * 2000) / 2000, n = Math.floor((c.x[c.x.length - 1] - km0) / 0.0005) + 1, v = new Array(n).fill(null);
+    for (var i = 0; i < c.x.length; i++) {
+      var y = c.y[i]; if (y === null || y === 0) continue;
+      var k = Math.round((c.x[i] - km0) / 0.0005); if (k < 0 || k >= n) continue;
+      if (v[k] === null || y < v[k]) v[k] = y;
+    }
+    return { km0: km0, v: v };
+  }
+  function desfase(c, s) {
+    if (!c || !s || !c.x.length) return null;
+    var g = grillaDe(c);
+    function ant(km) { var k = Math.round((km - s.km0) / s.paso_km); if (k < 0 || k >= s.n) return null; var z = s.vals[k]; return z >= 0 ? (z + 5000) / 1000 : null; }
+    var a = Math.max(g.km0, s.km0), b = Math.min(g.km0 + g.v.length * 0.0005, s.km0 + s.n * s.paso_km), res = [];
+    for (var w = a; w + 1 <= b; w += 1) {
+      var mejor = null;
+      for (var d = -40; d <= 40; d++) {   // d en medios metros
+        var xs = [], ys = [];
+        for (var km = w; km < w + 1; km += 0.0005) {
+          var k = Math.round((km - g.km0) / 0.0005), p = k >= 0 && k < g.v.length ? g.v[k] : null, q = ant(km - d * 0.0005);
+          if (p !== null && q !== null && p < 15.3 && q < 15.3) { xs.push(p); ys.push(q); }
+        }
+        if (xs.length < 800) continue;
+        var mx = xs.reduce(function (s1, z) { return s1 + z; }, 0) / xs.length, my = ys.reduce(function (s1, z) { return s1 + z; }, 0) / ys.length, sxy = 0, sxx = 0, syy = 0;
+        for (var i = 0; i < xs.length; i++) { sxy += (xs[i] - mx) * (ys[i] - my); sxx += (xs[i] - mx) * (xs[i] - mx); syy += (ys[i] - my) * (ys[i] - my); }
+        if (sxx < 1e-6 || syy < 1e-6) continue;
+        var r = sxy / Math.sqrt(sxx * syy);
+        if (!mejor || r > mejor.r) mejor = { d: d / 2, r: r };
+      }
+      if (mejor && mejor.r >= 0.6 && Math.abs(mejor.d) < 20) res.push(mejor);
+    }
+    if (res.length < 2) return null;
+    var ds = res.map(function (z) { return z.d; }).sort(function (p, q) { return p - q; });
+    var med = ds.length % 2 ? ds[(ds.length - 1) / 2] : (ds[ds.length / 2 - 1] + ds[ds.length / 2]) / 2;
+    return { metros: med, ventanas: res.length, minimo: ds[0], maximo: ds[ds.length - 1], correlacion: Math.round(res.reduce(function (s1, z) { return s1 + z.r; }, 0) / res.length * 100) / 100, aviso: Math.abs(med) > DESFASE_AVISO_M };
+  }
+
+  var api = { revisar: revisar, desfase: desfase, DESFASE_AVISO_M: DESFASE_AVISO_M };
+  if (typeof module !== 'undefined' && module.exports) module.exports = api; else global.Controles = api;
+})(typeof window !== 'undefined' ? window : this);
+</script>
+<script type="text/plain" data-vendor="../importador/reemplazo.js">/* ../importador/reemplazo.js (diferida: no se ejecuta al abrir) */
+/* =====================================================================
+ * reemplazo.js — Informe re-emitido y varias cargas de la misma vía y fecha (tarea c37, 25/10/2026)
+ * Plataforma de desgaste de catenaria · Línea Roca · Geismar 201
+ *
+ * Funciona en el navegador (global Reemplazo) y en Node (module.exports). Sesión de operador o administrador.
+ * Usa CargaBase (carga_base.js) y la función de la base reemplazar_medicion() (script 17).
+ *
+ * Problema (pendiente de c06): si la misma vía y fecha ya está publicada, la carga la salteaba entera. Dos casos reales:
+ *   · RE-EMITIDO: el procesamiento de datos manda de nuevo el informe de esa fecha (corregido). Tiene que reemplazar al viejo.
+ *   · COMPLEMENTO: la misma vía y fecha viene en dos archivos (p. ej. AV-BZ y BZ-LP del 05-09-2025). Tiene que sumarse.
+ * Cómo:
+ *   1. analizar(): por cada medición del plan que ya está publicada y que un informe NUEVO (Excel no registrado) trae como su
+ *      medición actual, baja los Excel con que se armó la publicada (observaciones «Fuente(s): …» y archivo vinculado) y
+ *      decide por medición:
+ *        · el Excel viejo que traía ESA fecha como su medición actual y se superpone ≥ 50 % en km con el nuevo → re-emitido:
+ *          queda afuera (marca «[c37 excluye: huella]» en las observaciones, para que c17 y c45–c47 no lo vuelvan a mezclar);
+ *        · si no se superpone → complemento: se suman los dos.
+ *      Rearma la medición con el mismo importador (manda el original, por vano la de dato y más cobertura) y la compara vano
+ *      por vano con la publicada. Si da igual, no hay nada que hacer.
+ *   2. ejecutar(): la versión nueva queda en borrador con reemplaza_a = la publicada y reemplazar_medicion() hace el cambio en
+ *      una transacción (anula la vieja con motivo, publica la nueva, pasa las clasificaciones ±2 m con su firma).
+ * ===================================================================== */
+(function (global) {
+  'use strict';
+  var LOTE = 500, SOLAPE = 0.5;
+  function r3(v) { return v == null ? null : +(+v).toFixed(3); }
+  function uniq(a) { return a.filter(function (x, i) { return a.indexOf(x) === i; }); }
+  async function q(paso, promesa) { var r = await promesa; if (r.error) { var e = new Error(paso + ': ' + (r.error.message || r.error)); e.original = r.error; throw e; } return r.data; }
+  async function leerTodo(sb, paso, tabla, cols, filtro, orden) {
+    var todo = [], desde = 0;
+    for (;;) { var qq = sb.from(tabla).select(cols); if (filtro) qq = filtro(qq); var d = await q(paso, qq.order(orden || 'id').range(desde, desde + 999)); todo = todo.concat(d); if (d.length < 1000) break; desde += 1000; }
+    return todo;
+  }
+  function fechaTxt(iso) { var p = String(iso).split('-'); return p[2] + '-' + p[1] + '-' + p[0]; }
+  function kmTxt(v) { return v.toLocaleString('es-AR', { minimumFractionDigits: 3, maximumFractionDigits: 3 }); }
+
+  // nombres de los Excel con que se armó una medición (texto de observaciones: «Fuente: X.» o «Fuentes: A · B (archivo vinculado: A).»)
+  function fuentesDe(obs) {
+    var t = String(obs || ''), i = t.search(/Fuentes?: /);
+    if (i < 0) return [];
+    t = t.slice(i).replace(/^Fuentes?: /, '');
+    var fin = t.search(/ \(archivo vinculado| La medición se tomó|\. Ubicada|\. La medición/);
+    if (fin >= 0) t = t.slice(0, fin);
+    return uniq(t.split(' · ').map(function (x) { return x.trim().replace(/\.$/, ''); }).filter(function (x) { return /\.xlsx$/i.test(x); }));
+  }
+  function actualDe(I) { return I.campanias.slice().sort(function (a, b) { return a.fecha < b.fecha ? -1 : 1; }).pop(); }
+  function rango(c) { var lo = Infinity, hi = -Infinity; c.x.forEach(function (v) { if (v < lo) lo = v; if (v > hi) hi = v; }); return [lo, hi]; }
+
+  /* ctx = { sb, core, CB, P, planilla, plan, infs:[{nombre,huella,I}], enBase:{clave:{estado,id}}, registrados:{huella:1},
+   *         bajar: async (storage_path) → bytes, leer: (bytes, nombre) → I, huella: async (bytes) → hex, origen, log } */
+  async function analizar(ctx) {
+    var core = ctx.core, P = ctx.P, items = [], log = ctx.log || function () {};
+    var cand = ctx.plan.mediciones.filter(function (m) { return ctx.enBase[m.clave] && ctx.enBase[m.clave].estado === 'publicada'; });
+    for (var ci = 0; ci < cand.length; ci++) {
+      var m = cand[ci];
+      // informes NUEVOS (no registrados) que traen esta fecha como su medición actual
+      var nuevos = ctx.infs.filter(function (inf) {
+        if (ctx.registrados[inf.huella]) return false;
+        var a = actualDe(inf.I), R = core.elegirRecorrido(P, inf.I);
+        return a && a.fecha === m.fecha && R && R.hoja === m.recorrido && inf.I.via === m.via;
+      });
+      if (!nuevos.length) continue;
+      var pubId = ctx.enBase[m.clave].id;
+      log('Comparando ' + m.clave + ' con la publicada N° ' + pubId + '…');
+      var pub = await q('Medición publicada', ctx.sb.from('medicion').select('id, recorrido, via, fecha, observaciones, archivo_id, km_inicio, km_fin').eq('id', pubId).single());
+      var nombres = fuentesDe(pub.observaciones);
+      var viejos = await q('Excel de la publicada', ctx.sb.from('archivo_fuente').select('id, nombre, huella, storage_path').or(
+        (nombres.length ? 'nombre.in.(' + nombres.map(function (n) { return '"' + n.replace(/"/g, '') + '"'; }).join(',') + '),' : '') + 'id.eq.' + (pub.archivo_id || 0)));
+      var excluirPrevio = (ctx.CB.excluidosDe([pub])[m.clave] || []);
+      var usar = [], excluidos = [], faltan = [];
+      for (var vi = 0; vi < viejos.length; vi++) {
+        var a = viejos[vi];
+        if (excluirPrevio.indexOf(a.huella) >= 0) continue;
+        if (nuevos.some(function (n) { return n.huella === a.huella; })) continue;
+        var bytes;
+        try { bytes = await ctx.bajar(a.storage_path); } catch (e) { faltan.push(a.nombre); continue; }
+        var I = ctx.leer(bytes, a.nombre), act = actualDe(I), R2 = core.elegirRecorrido(P, I);
+        var esActual = act && act.fecha === m.fecha && R2 && R2.hoja === m.recorrido && I.via === m.via;
+        var ov = 0;
+        if (esActual) {
+          var rv = rango(act);
+          nuevos.forEach(function (n) { var rn = rango(actualDe(n.I)), s = Math.min(rv[1], rn[1]) - Math.max(rv[0], rn[0]), base = Math.min(rv[1] - rv[0], rn[1] - rn[0]); if (base > 0) ov = Math.max(ov, s / base); });
+        }
+        if (esActual && ov >= SOLAPE) excluidos.push({ nombre: a.nombre, huella: a.huella, solape: Math.round(ov * 100), km: rango(act) });
+        else usar.push({ nombre: a.nombre, huella: a.huella, I: I, bytes: bytes });
+      }
+      if (faltan.length) { items.push({ clave: m.clave, publicada: pub, error: 'No se pudieron bajar de la base los Excel con que se armó la publicada (' + faltan.join(', ') + '): no se puede comparar.' }); continue; }
+      var excl = {}; excl[m.clave] = excluirPrevio.concat(excluidos.map(function (x) { return x.huella; }));
+      var tipo = excluidos.length ? 'reemitido' : 'complemento';
+      var origen = (ctx.origen || 'Carga desde la app (c37).') + (tipo === 'reemitido'
+        ? ' Informe re-emitido: reemplaza a ' + excluidos.map(function (x) { return x.nombre; }).join(', ') + '.'
+        : ' Completada con ' + nuevos.map(function (n) { return n.nombre; }).join(', ') + '.');
+      var plan2 = ctx.CB.planificar(core, P, ctx.planilla, nuevos.concat(usar), { origen: origen, etiquetaEvento: 'la carga de la medición (c37)', excluir: excl });
+      var m2 = plan2.mediciones.filter(function (x) { return x.clave === m.clave; })[0];
+      if (plan2.errores.length || !m2) { items.push({ clave: m.clave, publicada: pub, error: 'No se pudo rearmar la medición: ' + (plan2.errores.join(' | ') || 'no salió del plan') }); continue; }
+      // comparar vano por vano con la publicada
+      var rs = await leerTodo(ctx.sb, 'Resultados publicados', 'resultado_vano', 'vano_id, min_mm, estado, revisar, cobertura, vano!inner(recorrido, via, piquete_desde, piquete_hasta)',
+        function (x) { return x.eq('medicion_id', pub.id); }, 'vano_id');
+      var antes = {}; rs.forEach(function (r) { var v = Array.isArray(r.vano) ? r.vano[0] : r.vano; antes[ctx.CB.claveVano(v.recorrido, v.via, v.piquete_desde, v.piquete_hasta)] = r; });
+      var cambios = { distintos: 0, nuevos: 0, quitados: 0, estados: 0, lista: [] };
+      m2.resultados.forEach(function (r) {
+        var b = antes[r.vano];
+        if (!b) { cambios.nuevos++; return; }
+        var bm = b.min_mm == null ? null : r3(b.min_mm);
+        if (bm !== r.min_mm || b.estado !== r.estado || !!b.revisar !== !!r.revisar) {
+          cambios.distintos++;
+          if (b.estado !== r.estado) { cambios.estados++; cambios.lista.push({ vano: r.vano, antes: b.estado, valorAntes: bm, ahora: r.estado, valor: r.min_mm }); }
+        }
+      });
+      var nuevasClaves = {}; m2.resultados.forEach(function (r) { nuevasClaves[r.vano] = 1; });
+      Object.keys(antes).forEach(function (k) { if (!nuevasClaves[k]) cambios.quitados++; });
+      var bytesNuevos = {}; nuevos.forEach(function (n) { bytesNuevos[n.huella] = n.bytes || (ctx.bytes && ctx.bytes[n.huella]); });
+      items.push({ clave: m.clave, publicada: pub, tipo: tipo, nuevos: nuevos.map(function (n) { return { nombre: n.nombre, huella: n.huella, km: rango(actualDe(n.I)) }; }),
+                   excluidos: excluidos, usados: usar.map(function (u) { return u.nombre; }), medicion: m2, cambios: cambios,
+                   iguales: !cambios.distintos && !cambios.nuevos && !cambios.quitados, bytes: bytesNuevos,
+                   km: { antes: [+pub.km_inicio, +pub.km_fin], despues: [m2.km_inicio, m2.km_fin] } });
+    }
+    return items;
+  }
+
+  function motivoDe(it) {
+    var f = fechaTxt(it.medicion.fecha);
+    return it.tipo === 'reemitido'
+      ? 'Informe re-emitido de la medición del ' + f + ': ' + it.nuevos.map(function (n) { return n.nombre; }).join(', ') + ' reemplaza a ' + it.excluidos.map(function (x) { return x.nombre; }).join(', ') + '.'
+      : 'Medición del ' + f + ' completada con ' + it.nuevos.map(function (n) { return n.nombre; }).join(', ') + ' (misma vía y fecha en otro archivo; km ' + kmTxt(it.km.despues[0]) + '–' + kmTxt(it.km.despues[1]) + ').';
+  }
+
+  /* op = { uid, gzip: async(texto)→bytes, log } */
+  async function ejecutar(sb, it, op) {
+    var log = op.log || function () {}, m = it.medicion, etiq = m.recorrido + ' · ' + m.via + ' · ' + m.fecha;
+    var perfil = await q('Leer perfil', sb.from('perfil').select('rol, activo').eq('id', op.uid).maybeSingle());
+    if (!perfil || !perfil.activo || (perfil.rol !== 'admin' && perfil.rol !== 'operador')) throw new Error('El reemplazo lo hace un operador o un administrador activo.');
+    var vig = await q('Planilla vigente', sb.from('version_piquetes').select('id').eq('vigente', true).single());
+    var mapaVano = {};
+    (await leerTodo(sb, 'Vanos vigentes', 'vano', 'id, recorrido, via, piquete_desde, piquete_hasta', function (x) { return x.eq('version_id', vig.id).eq('recorrido', m.recorrido).eq('via', m.via); }))
+      .forEach(function (v) { mapaVano[v.recorrido + '|' + v.via + '|' + v.piquete_desde + '|' + v.piquete_hasta] = v.id; });
+    // un borrador anterior de este mismo reemplazo (corte a mitad): se rehace
+    var prev = await q('Buscar borrador', sb.from('medicion').select('id, estado').eq('reemplaza_a', it.publicada.id).eq('estado', 'borrador'));
+    for (var b = 0; b < prev.length; b++) await q('Borrar borrador a medias', sb.from('medicion').delete().eq('id', prev[b].id));
+    // Excel: los nuevos se suben y registran; los viejos ya están
+    var idArch = {};
+    for (var a = 0; a < m.archivos.length; a++) {
+      var h = m.archivos[a], ex = await q('Buscar Excel', sb.from('archivo_fuente').select('id').eq('huella', h).maybeSingle());
+      if (ex) { idArch[h] = ex.id; continue; }
+      var bytes = it.bytes[h]; if (!bytes) throw new Error('Falta el Excel ' + h.slice(0, 8) + '… para subir.');
+      var ruta = 'historico/' + h + '.xlsx', nombre = (it.nuevos.filter(function (n) { return n.huella === h; })[0] || {}).nombre || (h + '.xlsx');
+      var up = await sb.storage.from('originales').upload(ruta, bytes, { contentType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', upsert: false });
+      if (up.error && !(String(up.error.statusCode || '') === '409' || /exist|duplicate/i.test(up.error.message || ''))) throw new Error('Subir originales/' + ruta + ': ' + up.error.message);
+      idArch[h] = (await q('Registrar Excel', sb.from('archivo_fuente').insert({ nombre: nombre, huella: h, storage_path: 'originales/' + ruta, subido_por: op.uid }).select('id').single())).id;
+    }
+    var med = await q('Crear borrador ' + etiq, sb.from('medicion').insert({
+      recorrido: m.recorrido, via: m.via, fecha: m.fecha, etiqueta: m.etiqueta, seccion: m.seccion, tramos: m.tramos,
+      km_inicio: m.km_inicio, km_fin: m.km_fin, version_piquetes_id: vig.id, archivo_id: idArch[m.archivoPrincipal], reemplaza_a: it.publicada.id, estado: 'borrador',
+      observaciones: m.observaciones + ' Reemplaza a la medición ' + it.publicada.id + ' (c37).' }).select('id').single());
+    var filas = m.resultados.map(function (r) {
+      var vid = mapaVano[r.vano]; if (!vid) throw new Error('Vano sin id en la planilla vigente: ' + r.vano);
+      return { medicion_id: med.id, vano_id: vid, muestras: r.muestras, validas: r.validas, cobertura: r.cobertura, min_mm: r.min_mm, km_min: r.km_min,
+               min_sin_caidas_mm: r.min_sin_caidas_mm, prom_mm: r.prom_mm, vida_consumida: r.vida_consumida, estado: r.estado, revisar: r.revisar };
+    });
+    for (var i = 0; i < filas.length; i += LOTE) await q('Resultados ' + etiq, sb.from('resultado_vano').insert(filas.slice(i, i + LOTE)));
+    if (m.anomalias.length) {
+      var an = m.anomalias.map(function (x) { return { medicion_id: med.id, vano_id: mapaVano[x.vano], km_desde: x.km_desde, km_hasta: x.km_hasta, valor_min_mm: x.valor_min_mm }; });
+      var ids = [];
+      for (var j = 0; j < an.length; j += LOTE) ids = ids.concat(await q('Lecturas aisladas ' + etiq, sb.from('anomalia').insert(an.slice(j, j + LOTE)).select('id')));
+      var reales = ids.filter(function (x, k) { return m.anomalias[k].clasificacion === 'real'; }).map(function (x) { return x.id; });
+      if (reales.length) await q('Regla del Tramo 7', sb.from('anomalia').update({ clasificacion: 'real', nota: m.anomalias.filter(function (x) { return x.clasificacion === 'real'; })[0].nota }).in('id', reales));
+    }
+    if (m.serie) {
+      var rs = 'medicion/' + med.id + '.json.gz';
+      var u2 = await sb.storage.from('series').upload(rs, await op.gzip(JSON.stringify(m.serie)), { contentType: 'application/gzip', upsert: false });
+      if (u2.error && !(String(u2.error.statusCode || '') === '409' || /exist|duplicate/i.test(u2.error.message || ''))) throw new Error('Subir series/' + rs + ': ' + u2.error.message);
+      await q('Registrar serie', sb.from('serie').insert({ medicion_id: med.id, storage_path: 'series/' + rs, muestras: m.muestras, paso_m: m.paso_m }));
+    }
+    var motivo = motivoDe(it);
+    var ctl = await q('Controlar el reemplazo', sb.rpc('reemplazar_medicion', { p_nueva: med.id, p_motivo: motivo, p_confirmar: false }));
+    log('Control: ' + ctl.clasificaciones_pasan + ' clasificaciones pasan; ' + ctl.clasificaciones_sin_par + ' no encuentran su lectura.');
+    var fin = await q('Reemplazar', sb.rpc('reemplazar_medicion', { p_nueva: med.id, p_motivo: motivo, p_confirmar: true }));
+    log('✓ ' + etiq + ': publicada la N° ' + med.id + ', anulada la N° ' + it.publicada.id + '.');
+    return { nueva: med.id, vieja: it.publicada.id, control: fin, motivo: motivo };
+  }
+
+  var api = { analizar: analizar, ejecutar: ejecutar, fuentesDe: fuentesDe, motivoDe: motivoDe };
+  if (typeof module !== 'undefined' && module.exports) module.exports = api; else global.Reemplazo = api;
+})(typeof window !== 'undefined' ? window : this);
 </script>
 <script>/* js/pantallas/sesion.js */
 /* =====================================================================
@@ -7601,13 +7984,16 @@ if (typeof module !== "undefined") module.exports = { combinadas: combinadas, el
         'Trabajo → Carga de medición. La planilla de piquetes no se elige: la app usa la vigente.',
         'Elegí los informes de desgaste procesados («Informe Desgaste …xlsx»), uno o varios; podés sumar de varias carpetas. Tocá «Analizar».',
         'Revisá la tabla: una fila por vía y fecha, con críticos, alertas y datos a confirmar. «Ya está publicada: se saltea» = esa fecha ya estaba (suele ser la columna «medición anterior» del informe).',
+        'La app controla cada informe: fecha imposible, lecturas fuera de rango, nada dentro de la planilla o un formato distinto lo sacan de la carga (sacalo de la lista o pedí que se reprocese). Los avisos (piquetes con otra progresiva, huecos, relleno 15,49) no impiden publicar, pero leelos.',
+        '«Corrimiento»: cuántos metros quedan corridas las lecturas contra la medición anterior de esa zona. De 1 a 5 m es normal (margen de la cámara); con más de 5 m, revisá el km de partida con el procesamiento de datos antes de publicar.',
+        'Si el informe es de una fecha ya publicada (re-emitido, o la otra parte del mismo día en otro archivo, como AV-BZ y BZ-LP), la app lo compara con lo publicado y te muestra qué cambia. Para reemplazarla, tildá «Reemplazar…»: la vieja queda anulada con el motivo y las lecturas ya clasificadas pasan con su firma.',
         'Tildá que revisaste y tocá «Publicar». Al final dice «todo coincide»: ya cuenta para el estado. Si se corta, volvé a publicar: sigue desde donde quedó.',
         'Los datos a confirmar (⚑) nuevos quedan en Revisión. Si cargaste algo equivocado, anulalo desde Mediciones con el motivo.'],
         ir: ['#/carga', 'Ir a Carga de medición'] },
       { id: 'mediciones', para: 'operador', q: '¿Cómo veo o anulo una medición?', pasos: [
         'Mediciones: lista por tramo y vía; tocá una para ver el detalle y en cuántos vanos define hoy el estado.',
         'Anular: botón en el detalle, con motivo obligatorio. No se deshace desde la app.',
-        'Si un informe se reprocesó, anulá la medición vieja con el motivo y cargá el informe nuevo (ver «¿Cómo cargo una medición nueva?»).'],
+        'Si un informe se reprocesó, cargá el informe nuevo en Carga de medición: la app ofrece reemplazar la publicada sin perder las clasificaciones (ver «¿Cómo cargo una medición nueva?»).'],
         ir: ['#/mediciones', 'Ir a Mediciones'] },
       { id: 'usuarios', para: 'admin', q: '¿Cómo doy de alta o de baja a un usuario?', pasos: [
         'Administración → Usuarios → Agregar usuario: mail institucional, nombre, perfil (y cargo si es Análisis y gestión).',
@@ -8529,14 +8915,21 @@ if (typeof module !== "undefined") module.exports = { combinadas: combinadas, el
  * - Lo publicado no se toca. Si se corta, se vuelve a apretar «Publicar» y sigue (borradores a medias se rehacen).
  * - Quién puede: la base (RLS: es_operador()). carga_base.js deja a un operador solo SUMAR mediciones sobre la planilla
  *   vigente; cargar una planilla nueva es de administradores (c11/c17).
- * DESPUÉS (Hoja de ruta c06): crudos (c28), controles de formato y de sentido, informe re-emitido (reemplaza_a),
- * varias cargas de la misma vía y fecha.
+ * c37 (25/10/2026):
+ *   - Controles de formato y de sentido de cada informe (importador/controles.js): lo que no tiene sentido (fecha futura, más
+ *     del 10 % de lecturas imposibles, nada dentro de la planilla, formato distinto) es error y no deja publicar; el resto, avisos.
+ *   - Corrimiento contra la medición anterior de esa zona (aviso si pasa de 5 m).
+ *   - Informe re-emitido y misma vía y fecha en dos archivos (importador/reemplazo.js + script 17): si la medición ya está
+ *     publicada y el informe es nuevo, se rearma con los Excel de la publicada y se compara vano por vano. Si cambia, se ofrece
+ *     reemplazarla (tilde por medición); el cambio lo hace reemplazar_medicion() en una transacción, pasando las clasificaciones.
+ * DESPUÉS: crudos (c28).
  * Librerías pesadas (SheetJS, importador) se cargan recién al entrar a esta pantalla (UI.cargarScript).
  * ===================================================================== */
 (function (global) {
   'use strict';
   var h = UI.h;
   var XLSX_SRC = 'vendor/xlsx.full.min.js', CORE_SRC = '../importador/core.js', CARGA_SRC = '../importador/carga_base.js';
+  var CTL_SRC = '../importador/controles.js', REEMP_SRC = '../importador/reemplazo.js';   // c37
   var ORIGEN = 'Carga desde la app (Trabajo → Carga de medición, c06).';
   var VIA = { ASC: 'ascendente', DESC: 'descendente', V1: 'Vía 1', V2: 'Vía 2', V3: 'Vía 3', V4: 'Vía 4' };
   function T() { return global.PantallaTramo; }
@@ -8548,8 +8941,10 @@ if (typeof module !== "undefined") module.exports = { combinadas: combinadas, el
     await UI.cargarScript(XLSX_SRC, 'XLSX');
     await UI.cargarScript(CORE_SRC, 'parsePiquetes');
     await UI.cargarScript(CARGA_SRC, 'CargaBase');
+    await UI.cargarScript(CTL_SRC, 'Controles');
+    await UI.cargarScript(REEMP_SRC, 'Reemplazo');
     return { PERFIL: global.PERFIL, REGLAS: global.REGLAS, parsePiquetes: global.parsePiquetes, parseInforme: global.parseInforme,
-             procesarCampania: global.procesarCampania, elegirRecorrido: global.elegirRecorrido, normCodigo: global.normCodigo };
+             procesarCampania: global.procesarCampania, elegirRecorrido: global.elegirRecorrido, normCodigo: global.normCodigo, limpiarSerie: global.limpiarSerie };
   }
   async function huella(buf) {
     if (!global.crypto || !crypto.subtle) throw new Error('Este navegador no permite calcular la huella de los archivos. Usá Chrome o Edge actualizados.');
@@ -8674,8 +9069,8 @@ if (typeof module !== "undefined") module.exports = { combinadas: combinadas, el
 
     // ---------- 3. Analizar ----------
     btAna.addEventListener('click', async function () {
-      invalidar(); btAna.disabled = true; S.corriendo = true; S.bytes = {}; S.enBase = {}; S.yaSubidos = {};
-      var fallidos = [], repetidos = [], infs = [];
+      invalidar(); btAna.disabled = true; S.corriendo = true; S.bytes = {}; S.enBase = {}; S.yaSubidos = {}; S.controles = []; S.reemplazos = []; S.desfase = {};
+      var fallidos = [], repetidos = [], infs = [], hoy = new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 10);
       try {
         S.bytes[S.planilla.huella] = S.bytesPlanilla;
         for (var i = 0; i < S.archivos.length; i++) {
@@ -8687,6 +9082,10 @@ if (typeof module !== "undefined") module.exports = { combinadas: combinadas, el
           try {
             var I = S.core.parseInforme(libro(buf, ['RESUMEN', 'Datos Filtrado']), f.name);
             if (!I.campanias.length) throw new Error('no tiene columnas de medición con fecha en «Datos Filtrado».');
+            // c37: controles de formato y de sentido; un error saca este informe de la carga
+            var ctl = global.Controles.revisar(S.core, S.P, { nombre: f.name, I: I }, { hoy: hoy });
+            S.controles.push({ nombre: f.name, errores: ctl.errores, avisos: ctl.avisos });
+            if (ctl.errores.length) throw new Error(ctl.errores.join(' '));
             S.bytes[hh] = new Uint8Array(buf);
             infs.push({ nombre: f.name, huella: hh, I: I });
           } catch (e) { fallidos.push(f.name + ': ' + (e.message || e)); }
@@ -8694,7 +9093,7 @@ if (typeof module !== "undefined") module.exports = { combinadas: combinadas, el
         msgAna.replaceChildren(h('div', { class: 'cargando' }, 'Ubicando las lecturas en los vanos y calculando estados…'));
         await esperar();
         var plan = global.CargaBase.planificar(S.core, S.P, S.planilla, infs, { origen: ORIGEN + ' Cargó: ' + ((ctx.app.estado.sesion || {}).nombre || 'usuario') + '.', etiquetaEvento: 'la carga de la medición (c06)' });
-        fallidos.forEach(function (x) { plan.errores.push('No se pudo leer ' + x); });
+        fallidos.forEach(function (x) { plan.errores.push('No se carga ' + x); });
         plan.repetidos = repetidos;
         msgAna.replaceChildren(h('div', { class: 'cargando' }, 'Comparando con lo que ya está en la base…'));
         // ¿cada medición ya está en la base?
@@ -8710,6 +9109,18 @@ if (typeof module !== "undefined") module.exports = { combinadas: combinadas, el
           var ra = await Conexion.leer('archivo_fuente', { columnas: 'huella, nombre, subido_en', filtros: [['in', 'huella', hs]] });
           if (!ra.error) (ra.datos || []).forEach(function (a) { S.yaSubidos[a.huella] = a; });
         }
+        // c37: misma vía y fecha ya publicada con un informe NUEVO → re-emitido o complemento
+        if (plan.mediciones.some(function (m) { return S.enBase[m.clave].estado === 'publicada'; })) {
+          msgAna.replaceChildren(h('div', { class: 'cargando' }, 'Comparando con las mediciones ya publicadas de esas fechas…'));
+          var reg = {}; Object.keys(S.yaSubidos).forEach(function (k) { reg[k] = 1; });
+          S.reemplazos = await global.Reemplazo.analizar({ sb: Conexion.cliente, core: S.core, CB: global.CargaBase, P: S.P, planilla: S.planilla, plan: plan, infs: infs,
+            enBase: S.enBase, registrados: reg, bytes: S.bytes, origen: ORIGEN + ' Cargó: ' + ((ctx.app.estado.sesion || {}).nombre || 'usuario') + '.',
+            bajar: async function (ruta) { var i = ruta.indexOf('/'), d = await Conexion.cliente.storage.from(ruta.slice(0, i)).download(ruta.slice(i + 1)); if (d.error) throw new Error(d.error.message || d.error); return new Uint8Array(await d.data.arrayBuffer()); },
+            leer: function (b, nombre) { return S.core.parseInforme(libro(b, ['RESUMEN', 'Datos Filtrado']), nombre); } });
+        }
+        // c37: corrimiento de cada medición nueva contra la medición anterior de esa zona (aviso si pasa de 5 m)
+        msgAna.replaceChildren(h('div', { class: 'cargando' }, 'Controlando el corrimiento contra la medición anterior…'));
+        await desfases(plan, infs);
         if (!ctx.vigente()) return;
         S.plan = plan; S.infs = infs;
         msgAna.replaceChildren();
@@ -8719,24 +9130,66 @@ if (typeof module !== "undefined") module.exports = { combinadas: combinadas, el
       } finally { S.corriendo = false; revisar(); }
     });
 
+    // c37: corrimiento contra la medición publicada anterior más nueva del mismo recorrido y vía que se superpone ≥ 2 km
+    async function desfases(plan, infs) {
+      var porVia = {};
+      for (var i = 0; i < plan.mediciones.length; i++) {
+        var m = plan.mediciones[i], est = S.enBase[m.clave], rz = (S.reemplazos || []).filter(function (x) { return x.clave === m.clave && !x.iguales && !x.error; })[0];
+        if (est.estado === 'publicada' && !rz) continue;
+        var inf = infs.filter(function (x) { var a = x.I.campanias.slice().sort(function (p, q) { return p.fecha < q.fecha ? -1 : 1; }).pop(), R = S.core.elegirRecorrido(S.P, x.I);
+          return a && a.fecha === m.fecha && R && R.hoja === m.recorrido && x.I.via === m.via; })[0];
+        if (!inf) continue;
+        var col = inf.I.campanias.filter(function (c) { return c.fecha === m.fecha; })[0];
+        var k = m.recorrido + '|' + m.via;
+        if (!porVia[k]) {
+          var r = await Conexion.leer('medicion', { columnas: 'id, fecha, km_inicio, km_fin, serie(storage_path)', filtros: [['eq', 'recorrido', m.recorrido], ['eq', 'via', m.via], ['eq', 'estado', 'publicada']] });
+          porVia[k] = r.error ? [] : r.datos;
+        }
+        var lo = Math.min.apply(null, col.x), hi = Math.max.apply(null, col.x);
+        var ant = porVia[k].filter(function (x) { return x.fecha < m.fecha && Math.min(hi, +x.km_fin) - Math.max(lo, +x.km_inicio) >= 2; })
+          .sort(function (a, b) { return a.fecha < b.fecha ? 1 : -1; })[0];
+        if (!ant) { S.desfase[m.clave] = { sin: 'no hay medición anterior de esa zona' }; continue; }
+        try {
+          var sr = Array.isArray(ant.serie) ? ant.serie[0] : ant.serie;
+          var serie = await Serie.leer({ id: ant.id, storage_path: sr && sr.storage_path });
+          var d = global.Controles.desfase(col, serie);
+          S.desfase[m.clave] = d ? Object.assign({ contra: ant.fecha }, d) : { sin: 'sin señal suficiente para compararla con la del ' + fF(ant.fecha), contra: ant.fecha };
+        } catch (e) { S.desfase[m.clave] = { sin: 'no se pudo leer la curva del ' + fF(ant.fecha) }; }
+      }
+    }
+    function desfaseTxt(d) {
+      if (!d) return '';
+      if (d.sin) return h('span', { class: 'rd-peq', title: d.sin }, '—');
+      var t = (d.metros > 0 ? '+' : '') + UI.num(d.metros, 1) + ' m';
+      return h('span', { class: d.aviso ? 'est alerta' : null, title: 'Contra la medición del ' + fF(d.contra) + ' (' + d.ventanas + ' tramos de 1 km, de ' + UI.num(d.minimo, 1) + ' a ' + UI.num(d.maximo, 1) + ' m)' }, t + (d.aviso ? ' ⚠' : ''));
+    }
+
     function mostrarPlan() {
       var plan = S.plan, nuevas = plan.mediciones.filter(function (m) { return S.enBase[m.clave].estado !== 'publicada'; });
+      var rz = {}; (S.reemplazos || []).forEach(function (x) { rz[x.clave] = x; });
+      var cambios = (S.reemplazos || []).filter(function (x) { return !x.error && !x.iguales; });   // c37
+      var evaluar = nuevas.concat(cambios.map(function (x) { return x.medicion; }));
       var cuenta = function (ms, f) { return ms.reduce(function (s, m) { return s + m.resultados.filter(f).length; }, 0); };
-      var crit = cuenta(nuevas, function (r) { return r.estado === 'critico'; }), al = cuenta(nuevas, function (r) { return r.estado === 'alerta'; });
-      var flags = nuevas.reduce(function (s, m) { return s + m.anomalias.filter(function (a) { return a.clasificacion === 'sin_revisar'; }).length; }, 0);
+      var crit = cuenta(evaluar, function (r) { return r.estado === 'critico'; }), al = cuenta(evaluar, function (r) { return r.estado === 'alerta'; });
+      var flags = evaluar.reduce(function (s, m) { return s + m.anomalias.filter(function (a) { return a.clasificacion === 'sin_revisar'; }).length; }, 0);
       var bloques = [];
       bloques.push(h('div', { class: 'kpis' },
         kpi('Informes leídos', n(S.infs.length)), kpi('Mediciones nuevas', n(nuevas.length), null, nuevas.length < plan.mediciones.length ? (plan.mediciones.length - nuevas.length) + ' ya estaban' : null),
-        kpi('Vanos', n(nuevas.reduce(function (s, m) { return s + m.resultados.length; }, 0))),
+        cambios.length ? kpi('Para reemplazar', n(cambios.length), 'flag', 'ya publicadas que cambian') : null,
+        kpi('Vanos', n(evaluar.reduce(function (s, m) { return s + m.resultados.length; }, 0))),
         kpi('Críticos', n(crit), crit ? 'crit' : null), kpi('En alerta', n(al), al ? 'alerta' : null), kpi('Datos a confirmar', n(flags), flags ? 'flag' : null)));
       if (plan.errores.length) bloques.push(h('div', { class: 'msg error cg-err', role: 'alert' }, h('b', null, 'No se puede publicar mientras haya errores:'), lista(plan.errores)));
       // tabla por medición
       var filas = plan.mediciones.map(function (m) {
         var e = {}; m.resultados.forEach(function (r) { e[r.estado] = (e[r.estado] || 0) + 1; });
-        var b = S.enBase[m.clave], anterior = /columna «medición anterior»/.test(m.observaciones);
-        var est = b.estado === 'publicada' ? h('span', { class: 'chip' }, 'ya está publicada: se saltea')
+        var b = S.enBase[m.clave], anterior = /columna «medición anterior»/.test(m.observaciones), x = rz[m.clave];
+        if (x && !x.error && !x.iguales) { m = x.medicion; e = {}; m.resultados.forEach(function (r) { e[r.estado] = (e[r.estado] || 0) + 1; }); }
+        var est = x && x.error ? h('span', { class: 'chip flag', title: x.error }, 'ya está publicada: no se pudo comparar')
+          : x && !x.iguales ? h('span', { class: 'chip flag' }, (x.tipo === 'reemitido' ? 're-emitido: reemplaza a la N° ' : 'completa la N° ') + x.publicada.id)
+          : x && x.iguales ? h('span', { class: 'chip' }, 'ya está publicada, igual: se saltea')
+          : b.estado === 'publicada' ? h('span', { class: 'chip' }, 'ya está publicada: se saltea')
           : b.estado === 'borrador' ? h('span', { class: 'chip flag' }, 'quedó a medias: se rehace') : h('span', { class: 'chip cg-nueva' }, 'nueva');
-        return h('tr', { class: b.estado === 'publicada' ? 'cg-ya' : null },
+        return h('tr', { class: b.estado === 'publicada' && !(x && !x.error && !x.iguales) ? 'cg-ya' : null },
           T().td('Tramo', 'Tramo ' + m.tramos.join(', ')),
           T().td('Vía', VIA[m.via] || m.via),
           T().td('Fecha', [fF(m.fecha), m.etiqueta ? ' (' + m.etiqueta + ')' : '', anterior ? h('div', { class: 'rd-peq' }, 'de la columna «medición anterior»') : null]),
@@ -8748,14 +9201,35 @@ if (typeof module !== "undefined") module.exports = { combinadas: combinadas, el
           T().td('Sin dato', n((e.sin_dato || 0) + (e.sin_dato_relleno || 0)), 'num'),
           T().td('Secc. distinta', e.seccion_distinta ? n(e.seccion_distinta) : '', 'num'),
           T().td('A confirmar', m.anomalias.length ? n(m.anomalias.length) + (m.anomalias[0].clasificacion === 'real' ? ' (reales)' : ' ⚑') : '', 'num'),
+          T().td('Corrimiento', desfaseTxt(S.desfase[m.clave]), 'num'),
           T().td('En la base', est));
       });
       bloques.push(T().tabla([{ t: 'Tramo' }, { t: 'Vía' }, { t: 'Fecha' }, { t: 'mm²', cl: 'num' }, { t: 'Vanos', cl: 'num' }, { t: 'Crít.', cl: 'num' }, { t: 'Alerta', cl: 'num' },
-        { t: 'Normal', cl: 'num' }, { t: 'Sin dato', cl: 'num' }, { t: 'Secc. distinta', cl: 'num' }, { t: 'A confirmar', cl: 'num' }, { t: 'En la base' }], filas, 'cg-tabla'));
-      bloques.push(h('p', { class: 'nota' }, 'Cada informe trae su medición y la anterior (columna «medición anterior»); si la anterior ya está en la base se saltea. Crítico y alerta salen del mínimo de todas las lecturas del vano. «Secc. distinta»: la planilla marca otra sección que el informe; esos vanos no se evalúan. Los «a confirmar ⚑» quedan para Revisión: cuentan para el estado hasta que alguien los clasifique.'));
+        { t: 'Normal', cl: 'num' }, { t: 'Sin dato', cl: 'num' }, { t: 'Secc. distinta', cl: 'num' }, { t: 'A confirmar', cl: 'num' }, { t: 'Corrimiento', cl: 'num' }, { t: 'En la base' }], filas, 'cg-tabla'));
+      var desf = plan.mediciones.filter(function (m) { var d = S.desfase[m.clave]; return d && d.aviso; });
+      if (desf.length) bloques.push(UI.mensaje('error', 'Corrimiento de más de ' + global.Controles.DESFASE_AVISO_M + ' m contra la medición anterior en ' + desf.map(function (m) { return (VIA[m.via] || m.via) + ' ' + fF(m.fecha) + ' (' + UI.num(S.desfase[m.clave].metros, 1) + ' m)'; }).join(', ') +
+        '. Las lecturas quedarían corridas respecto de los piquetes: revisá con el procesamiento de datos el km de partida antes de publicar.'));
+      bloques.push(h('p', { class: 'nota' }, '«Corrimiento»: cuántos metros quedan corridas las lecturas respecto de la medición anterior de esa zona (entre 1 y 5 m es normal: margen de la cámara; más de 5 m, revisar). Cada informe trae su medición y la anterior (columna «medición anterior»); si la anterior ya está en la base se saltea. Crítico y alerta salen del mínimo de todas las lecturas del vano. «Secc. distinta»: la planilla marca otra sección que el informe; esos vanos no se evalúan. Los «a confirmar ⚑» quedan para Revisión: cuentan para el estado hasta que alguien los clasifique.'));
+      // c37: mediciones ya publicadas que cambian con este informe
+      if (cambios.length) bloques.push(h('div', { class: 'cg-reemp' }, h('h3', null, 'Ya publicadas que cambian'),
+        cambios.map(function (x) {
+          var c = x.cambios, m = x.medicion;
+          return h('div', { class: 'cg-reemp-it' },
+            h('b', null, (VIA[m.via] || m.via) + ' · ' + fF(m.fecha) + ' · Tramo ' + m.tramos.join(', ')),
+            h('p', null, x.tipo === 'reemitido'
+              ? 'Informe re-emitido: ' + x.nuevos.map(function (q) { return q.nombre; }).join(', ') + ' reemplaza a ' + x.excluidos.map(function (q) { return q.nombre; }).join(', ') + ' (se superponen ' + x.excluidos.map(function (q) { return q.solape + ' %'; }).join(', ') + '). El viejo deja de contar para esta medición.'
+              : 'Misma vía y fecha en otro archivo: ' + x.nuevos.map(function (q) { return q.nombre; }).join(', ') + ' se suma a lo publicado (' + (x.usados.join(', ') || 'medición N° ' + x.publicada.id) + '). Pasa de km ' + UI.num(x.km.antes[0], 3) + '–' + UI.num(x.km.antes[1], 3) + ' a km ' + UI.num(x.km.despues[0], 3) + '–' + UI.num(x.km.despues[1], 3) + '.'),
+            h('p', { class: 'nota' }, [c.nuevos ? UI.plural(c.nuevos, 'vano nuevo', 'vanos nuevos') : null, c.distintos ? UI.plural(c.distintos, 'vano con otro valor', 'vanos con otro valor') : null,
+              c.quitados ? UI.plural(c.quitados, 'vano que deja de tener lectura', 'vanos que dejan de tener lectura') : null].filter(Boolean).join(' · ') +
+              (c.estados ? '. Cambian de estado: ' + c.lista.slice(0, 8).map(function (z) { return vanoTxt(z.vano) + ' ' + ((UI.ESTADO[z.antes] || {}).t || z.antes) + ' → ' + ((UI.ESTADO[z.ahora] || {}).t || z.ahora) + (z.valor != null ? ' (' + UI.mm(z.valor) + ')' : ''); }).join('; ') + (c.lista.length > 8 ? '; …' : '') : '. No cambia el estado de ningún vano.')),
+            h('p', { class: 'nota' }, 'Al publicar, la medición N° ' + x.publicada.id + ' queda anulada con el motivo y la nueva toma su lugar. Las lecturas que alguien ya clasificó pasan con su firma si siguen en el mismo lugar (±2 m).'));
+        }),
+        h('label', { class: 'cg-check', for: 'cg-reemp-ok' }, (function () { var c = h('input', { type: 'checkbox', id: 'cg-reemp-ok' }); c.addEventListener('change', function () { S.reemplazar = c.checked; if (S.alCambiar) S.alCambiar(); }); return c; })(),
+          ' Reemplazar ' + (cambios.length === 1 ? 'esta medición publicada' : 'estas ' + cambios.length + ' mediciones publicadas') + ' (si no lo tildás, se saltean como hasta ahora)')));
+      var fallas = (S.reemplazos || []).filter(function (x) { return x.error; });
       // vanos críticos y en alerta de lo nuevo
       var malos = [];
-      nuevas.forEach(function (m) { m.resultados.forEach(function (r) { if (r.estado === 'critico' || r.estado === 'alerta') malos.push({ m: m, r: r }); }); });
+      evaluar.forEach(function (m) { m.resultados.forEach(function (r) { if (r.estado === 'critico' || r.estado === 'alerta') malos.push({ m: m, r: r }); }); });
       if (malos.length) {
         malos.sort(function (a, b) { return a.r.min_mm - b.r.min_mm; });
         bloques.push(h('details', { class: 'cg-det', open: malos.length <= 12 }, h('summary', null, UI.plural(malos.length, 'vano', 'vanos') + ' en crítico o alerta en las mediciones nuevas'),
@@ -8766,7 +9240,11 @@ if (typeof module !== "undefined") module.exports = { combinadas: combinadas, el
           }), 'cg-malos')));
       }
       var ya = S.infs.filter(function (x) { return S.yaSubidos[x.huella]; });
+      var ctls = (S.controles || []).filter(function (c) { return c.avisos.length; });
+      if (ctls.length) bloques.push(h('details', { class: 'cg-det', open: true }, h('summary', null, 'Controles de los informes: ' + UI.plural(ctls.reduce(function (s1, c) { return s1 + c.avisos.length; }, 0), 'aviso')),
+        ctls.map(function (c) { return h('div', null, h('b', { class: 'mono' }, c.nombre), lista(c.avisos)); })));
       var otros = [].concat(
+        fallas.map(function (x) { return x.clave.replace(/\|/g, ' · ') + ': ' + x.error; }),
         ya.map(function (x) { var a = S.yaSubidos[x.huella]; return 'Este mismo Excel ya se subió el ' + fF(a.subido_en) + (a.nombre !== x.nombre ? ' con el nombre «' + a.nombre + '»' : '') + ': ' + x.nombre; }),
         (plan.repetidos || []).map(function (d) { return 'Archivo repetido (idéntico a otro de la lista), se ignora: ' + d; }),
         plan.avisos);
@@ -8775,42 +9253,64 @@ if (typeof module !== "undefined") module.exports = { combinadas: combinadas, el
       if (otros.length) bloques.push(h('details', { class: 'cg-det', open: ya.length > 0 }, h('summary', null, UI.plural(otros.length, 'aviso') + ' de la lectura'), lista(otros)));
       resumen.replaceChildren.apply(resumen, bloques);
       cardRes.hidden = false;
-      armarPublicar(nuevas);
+      S.reemplazar = false;
+      armarPublicar(nuevas, cambios);
     }
 
     // ---------- 4. Publicar ----------
-    function armarPublicar(nuevas) {
+    function armarPublicar(nuevas, cambios) {
       var plan = S.plan;
       if (plan.errores.length) { zonaPub.replaceChildren(UI.mensaje('error', 'Corregí los errores de arriba (sacá el informe que falla o pedí que se reprocese) y volvé a analizar.')); cardPub.hidden = false; return; }
-      if (!nuevas.length) { zonaPub.replaceChildren(UI.mensaje('info', 'Todo lo de estos informes ya está publicado. No hay nada nuevo para cargar.')); cardPub.hidden = false; return; }
+      if (!nuevas.length && !cambios.length) { zonaPub.replaceChildren(UI.mensaje('info', 'Todo lo de estos informes ya está publicado. No hay nada nuevo para cargar.')); cardPub.hidden = false; return; }
       var chk = h('input', { type: 'checkbox', id: 'cg-ok' });
-      var bt = h('button', { class: 'btn', type: 'button', disabled: true }, 'Publicar ' + UI.plural(nuevas.length, 'medición', 'mediciones'));
+      var bt = h('button', { class: 'btn', type: 'button', disabled: true });
+      function rotulo() {
+        var r = S.reemplazar ? cambios.length : 0;
+        bt.textContent = nuevas.length && r ? 'Publicar ' + UI.plural(nuevas.length, 'medición', 'mediciones') + ' y reemplazar ' + r
+          : !nuevas.length ? 'Reemplazar ' + UI.plural(cambios.length, 'medición publicada', 'mediciones publicadas') : 'Publicar ' + UI.plural(nuevas.length, 'medición', 'mediciones');
+        bt.disabled = !chk.checked || S.corriendo || (!nuevas.length && !r);
+      }
+      S.alCambiar = rotulo; rotulo();
       var barra = h('div', { class: 'cg-barra', hidden: true }, h('i'));
       var estado = h('div', { role: 'status', class: 'cg-msg' }), log = h('pre', { class: 'cg-log' }), verif = h('div');
       var det = h('details', { class: 'cg-det', hidden: true }, h('summary', null, 'Detalle de la carga'), log);
-      chk.addEventListener('change', function () { bt.disabled = !chk.checked || S.corriendo; });
-      bt.addEventListener('click', function () { publicar(bt, chk, barra, estado, log, det, verif); });
+      chk.addEventListener('change', rotulo);
+      bt.addEventListener('click', function () { publicar(bt, chk, barra, estado, log, det, verif, nuevas, S.reemplazar ? cambios : []); });
       zonaPub.replaceChildren(
         h('label', { class: 'cg-check', for: 'cg-ok' }, chk, ' Revisé el resumen: las mediciones, fechas y vías son las que corresponden.'),
         h('div', { class: 'acciones' }, bt), barra, estado, det, verif);
       cardPub.hidden = false;
     }
 
-    async function publicar(bt, chk, barra, estado, log, det, verif) {
+    async function publicar(bt, chk, barra, estado, log, det, verif, nuevas, cambios) {
       bt.disabled = true; chk.disabled = true; btAna.disabled = true; S.corriendo = true;
+      var chR = document.getElementById('cg-reemp-ok'); if (chR) chR.disabled = true;
       barra.hidden = false; det.hidden = false; log.textContent = ''; verif.replaceChildren();
       var barI = barra.firstChild, ok = false;
       function escribir(t) { log.textContent += t + '\n'; log.scrollTop = log.scrollHeight; }
       function antesDeSalir(ev) { ev.preventDefault(); ev.returnValue = ''; }
       global.addEventListener('beforeunload', antesDeSalir);
       estado.replaceChildren(h('div', { class: 'cargando' }, 'Publicando… no cierres esta pestaña ni cambies de pantalla.'));
+      var hechos = [];
       try {
         var s = await Conexion.sesion();
-        var rep = await global.CargaBase.ejecutar(Conexion.cliente, S.plan, {
-          core: S.core, uid: s.id, archivos: S.bytes, gzip: gzip, log: escribir,
-          avance: function (fase, f, txt) { barI.style.width = Math.round((fase === 'planilla' ? f * 0.1 : 0.1 + f * 0.85) * 100) + '%'; if (txt) estado.replaceChildren(h('div', { class: 'cargando' }, 'Publicando ' + txt + '… no cierres esta pestaña.')); }
-        });
-        escribir('Listo en ' + rep.segundos + ' s (' + rep.pedidos + ' pedidos a la base). Mediciones: ' + rep.mediciones.cargadas + ' publicadas, ' + rep.mediciones.ya_estaban + ' ya estaban, ' + rep.mediciones.rehechas + ' borradores rehechos. Posibles reemplazos nuevos: ' + rep.eventos.nuevos + '.');
+        var rep = { mediciones: { cargadas: 0, rehechas: 0, ya_estaban: 0 }, eventos: { nuevos: 0 }, segundos: 0, pedidos: 0 };
+        if (nuevas.length || (cambios.length && S.plan.eventos.length)) {   // c37: con solo reemplazos, igual deja los posibles reemplazos de hilo sugeridos
+          rep = await global.CargaBase.ejecutar(Conexion.cliente, S.plan, {
+            core: S.core, uid: s.id, archivos: S.bytes, gzip: gzip, log: escribir,
+            avance: function (fase, f, txt) { barI.style.width = Math.round((fase === 'planilla' ? f * 0.1 : 0.1 + f * (cambios.length ? 0.6 : 0.85)) * 100) + '%'; if (txt) estado.replaceChildren(h('div', { class: 'cargando' }, 'Publicando ' + txt + '… no cierres esta pestaña.')); }
+          });
+          escribir('Listo en ' + rep.segundos + ' s (' + rep.pedidos + ' pedidos a la base). Mediciones: ' + rep.mediciones.cargadas + ' publicadas, ' + rep.mediciones.ya_estaban + ' ya estaban, ' + rep.mediciones.rehechas + ' borradores rehechos. Posibles reemplazos de hilo nuevos: ' + rep.eventos.nuevos + '.');
+        }
+        // c37: reemplazos de mediciones ya publicadas (cada uno en una transacción de la base)
+        for (var z = 0; z < cambios.length; z++) {
+          estado.replaceChildren(h('div', { class: 'cargando' }, 'Reemplazando ' + (z + 1) + ' de ' + cambios.length + '… no cierres esta pestaña.'));
+          barI.style.width = Math.round((0.7 + 0.25 * z / cambios.length) * 100) + '%';
+          var rr = await global.Reemplazo.ejecutar(Conexion.cliente, cambios[z], { uid: s.id, gzip: gzip, log: escribir });
+          hechos.push(rr);
+          escribir('Reemplazo: la N° ' + rr.vieja + ' quedó anulada y la N° ' + rr.nueva + ' publicada. Clasificaciones que pasaron: ' + rr.control.clasificaciones_pasan +
+            (rr.control.clasificaciones_sin_par ? '; ' + rr.control.clasificaciones_sin_par + ' no encontraron su lectura (quedan en el historial de la anulada)' : '') + '.');
+        }
         estado.replaceChildren(h('div', { class: 'cargando' }, 'Publicado. Controlando contra la base…'));
         ok = rep;
       } catch (e) {
@@ -8819,7 +9319,18 @@ if (typeof module !== "undefined") module.exports = { combinadas: combinadas, el
         bt.disabled = false; chk.disabled = false;
       }
       try {
-        var v = await global.CargaBase.verificar(Conexion.cliente, S.plan, { claves: S.plan.mediciones.filter(function (m) { return S.enBase[m.clave].estado !== 'publicada'; }).map(function (m) { return m.clave; }) });
+        // c37: lo reemplazado se controla contra la medición rearmada (la publicada de esa fecha ahora es la nueva)
+        var hechasCl = {}; cambios.forEach(function (x, i) { if (hechos[i]) hechasCl[x.clave] = x.medicion; });
+        var planV = Object.assign({}, S.plan, { mediciones: S.plan.mediciones.map(function (m) { return hechasCl[m.clave] || m; }) });
+        var v = await global.CargaBase.verificar(Conexion.cliente, planV, { claves: S.plan.mediciones.filter(function (m) { return S.enBase[m.clave].estado !== 'publicada' || hechasCl[m.clave]; }).map(function (m) { return m.clave; }) });
+        if (hechos.length) {
+          for (var w = 0; w < hechos.length; w++) {
+            var rn = await Conexion.leer('medicion', { columnas: 'estado', filtros: [['eq', 'id', hechos[w].nueva]] }), rv = await Conexion.leer('medicion', { columnas: 'estado', filtros: [['eq', 'id', hechos[w].vieja]] });
+            var bien = !rn.error && !rv.error && rn.datos[0].estado === 'publicada' && rv.datos[0].estado === 'anulada';
+            v.checks.push({ prueba: 'reemplazo: N° ' + hechos[w].nueva + ' publicada y N° ' + hechos[w].vieja + ' anulada', esperado: 1, obtenido: bien ? 1 : 0, ok: bien });
+          }
+          v.ok = v.checks.every(function (c) { return c.ok; });
+        }
         verif.replaceChildren(h('details', { class: 'cg-det', open: !v.ok }, h('summary', null, 'Control contra la base: ' + (v.ok ? 'todo coincide' : 'hay diferencias')),
           T().tabla([{ t: '' }, { t: 'Control' }, { t: 'En la base', cl: 'num' }, { t: 'Esperado', cl: 'num' }], v.checks.map(function (c) {
             return h('tr', null, T().td('', c.ok ? '✓' : '✗', c.ok ? 'cg-ok' : 'cg-mal'), T().td('Control', c.prueba), T().td('En la base', n(+c.obtenido), 'num'), T().td('Esperado', n(+c.esperado), 'num'));
@@ -8831,7 +9342,7 @@ if (typeof module !== "undefined") module.exports = { combinadas: combinadas, el
           var flags = S.plan.mediciones.filter(function (m) { return S.enBase[m.clave].estado !== 'publicada'; })
             .reduce(function (s, m) { return s + m.anomalias.filter(function (a) { return a.clasificacion === 'sin_revisar'; }).length; }, 0);
           estado.replaceChildren(UI.mensaje(v.ok ? 'ok' : 'error', v.ok
-            ? 'Listo: ' + UI.plural(ok.mediciones.cargadas + ok.mediciones.rehechas, 'medición publicada', 'mediciones publicadas') + ' y controladas contra la base. Ya cuentan para el estado de los vanos.'
+            ? 'Listo: ' + UI.plural(ok.mediciones.cargadas + ok.mediciones.rehechas, 'medición publicada', 'mediciones publicadas') + (hechos.length ? ' y ' + UI.plural(hechos.length, 'reemplazada', 'reemplazadas') : '') + ', controladas contra la base. Ya cuentan para el estado de los vanos.'
             : 'Se publicó, pero el control encontró diferencias (ver abajo). Avisale a un administrador antes de seguir.'),
             h('div', { class: 'acciones cg-sig' },
               h('a', { class: 'btn sec chico', href: '#/mediciones' }, 'Ver en Mediciones'),
