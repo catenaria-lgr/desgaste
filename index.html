@@ -604,6 +604,9 @@ table.rd-t { border-collapse: collapse; width: 100%; font-size: 13.5px; font-var
 .rd-tip .rd-peq { white-space: normal; max-width: 290px; }   /* c45: la aclaración larga se parte en el celular */
 .rd-leyenda .rd-tri { color: #d99100; font-size: 11px; margin-right: 3px; }
 .rd-tip-sec { color: #00695c; }
+/* c48: pedido de verificación («en verificación desde dd-mm»): no es un estado, es un aviso de trabajo */
+.chip.ped { background: #e6f0fb; color: #1b4f86; border: 1px dashed #7aa7d6; }
+.rd-aviso.ped { background: #eef5fd; border-color: #b9d3ef; }
 </style>
 <script>
   /* Antes de que supabase-js lea y limpie la dirección: ¿venimos del link de
@@ -849,6 +852,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       consultar: true,
       usuario: !!rol,                                           // cualquier usuario con perfil activo (c31)
       informar: rol === 'admin' || rol === 'operador',          // c40 (orden de la Coordinación, 23/10/2026): Análisis y gestión solo consulta
+      pedir: rol === 'admin' || (rol === 'gestion' && (s.cargo === 'jefe_base' || s.cargo === 'coordinacion')),   // c48: única escritura de Análisis y gestión (script 18)
       cargar: rol === 'operador' || rol === 'admin',
       clasificar: rol === 'operador' || rol === 'admin',
       anular: rol === 'operador' || rol === 'admin',
@@ -1090,6 +1094,12 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
     var d = new Date(String(iso).length === 10 ? iso + 'T12:00:00' : iso);
     return ('0' + d.getDate()).slice(-2) + '-' + ('0' + (d.getMonth() + 1)).slice(-2) + '-' + d.getFullYear();
   }
+  // c48: pedido de verificación pendiente de un vano (v.ped, de Modelo): «en verificación desde dd-mm». No cambia el estado.
+  function diaMes(iso) { var f = fecha(iso); return f ? f.slice(0, 5) : ''; }
+  function chipPedido(v) {
+    var p = v && v.ped; if (!p) return null;
+    return h('span', { class: 'chip ped', title: 'Mandado a verificar en campo' + (p.pedido_nombre ? ' por ' + p.pedido_nombre : '') + ' el ' + fecha(p.pedido_en) + (p.nota ? ': ' + p.nota : '') + '. No cambia el estado del vano.' }, 'en verificación desde ' + diaMes(p.pedido_en));
+  }
   function hoyISO() { var d = new Date(); return d.getFullYear() + '-' + ('0' + (d.getMonth() + 1)).slice(-2) + '-' + ('0' + d.getDate()).slice(-2); }
   function plural(n, uno, varios) { return n + ' ' + (n === 1 ? uno : (varios || uno + 's')); }
 
@@ -1143,7 +1153,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
     h: h, toast: toast, card: card, encabezado: encabezado, pendiente: pendiente, mensaje: mensaje, fecha: fecha, hoyISO: hoyISO,
     viasDelTramo: viasDelTramo, viaDesdeRuta: viaDesdeRuta, viaARuta: viaARuta, nombreVia: nombreVia, viaValida: viaValida,
     RX_PIQUETE: RX_PIQUETE, ESTADO_TRAMO: ESTADO_TRAMO,
-    ESTADO: ESTADO, chipEstado: chipEstado, chipFlag: chipFlag, num: num, mm: mm, km: km, plural: plural, cargarScript: cargarScript
+    ESTADO: ESTADO, chipEstado: chipEstado, chipFlag: chipFlag, chipPedido: chipPedido, diaMes: diaMes, num: num, mm: mm, km: km, plural: plural, cargarScript: cargarScript
   };
 })(window);
 
@@ -1784,7 +1794,10 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
         .then(function (x) { return x.error ? { datos: [], error: null, faltaSeccion: true } : x; }),
       // c39: límites de cada tramo sobre vía principal (script 11). Sin el 11 se sigue como antes (todo cuenta).
       Conexion.leerTodo('limite_tramo', { columnas: 'id, recorrido, via, tramo, piquete_desde, piquete_hasta, km_desde, km_hasta' })
-        .then(function (x) { return x.error ? { datos: [], error: null, faltaLimites: true } : x; })
+        .then(function (x) { return x.error ? { datos: [], error: null, faltaLimites: true } : x; }),
+      // c48: pedidos de verificación pendientes (script 18), para «en verificación desde dd-mm». Sin el 18 se sigue sin ellos.
+      Conexion.leerTodo('v_pedido_verificacion', { columnas: 'id, recorrido, via, km_desde, km_hasta, piquete_desde, piquete_hasta, pedido_en, pedido_nombre, nota', filtros: [['eq', 'estado', 'pendiente']] })
+        .then(function (x) { return x.error ? { datos: [], error: null, faltaPedidos: true } : x; })
     ]);
     var err = rs.map(function (r) { return r.error; }).filter(Boolean)[0];
     if (err) return { error: err };
@@ -1841,6 +1854,10 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       var k = v.recorrido + '|' + v.via; (M.RV[k] = M.RV[k] || []).push(v);
     });
     Object.keys(M.RV).forEach(function (k) { M.RV[k].sort(function (a, b) { return a.ki - b.ki; }); M.RV[k].forEach(function (v, i) { v.i = i; }); });
+    // c48: cada vano con su pedido de verificación pendiente más viejo (v.ped). No cambia el estado.
+    M.faltaPedidos = !!rs[8].faltaPedidos; M.PED = rs[8].datos.map(function (p) { return Object.assign({}, p, { a: +p.km_desde, b: +p.km_hasta }); })
+      .sort(function (x, y) { return String(x.pedido_en).localeCompare(String(y.pedido_en)); });
+    M.PED.forEach(function (p) { (M.RV[p.recorrido + '|' + p.via] || []).forEach(function (v) { if (!v.ped && v.ki < p.b - 0.0005 && v.kf > p.a + 0.0005) v.ped = p; }); });
     return { error: null, M: M };
   }
 
@@ -4582,6 +4599,7 @@ if (typeof module !== "undefined") module.exports = { combinadas: combinadas, el
       if (v.zona_sin_lectura_id) notas.push(h('span', { class: 'chip rd-bad' }, 'zona sin medición'));
       if (v.hilo_intervenido_despues) notas.push(h('span', { class: 'chip' }, 'hilo intervenido ' + UI.fecha(v.hilo_intervenido_despues)));
       if (v.fuente === 'calibre') notas.push(h('span', { class: 'chip vig', title: 'El estado sale de una verificación en campo con calibre' }, 'calibre ' + UI.fecha(v.fecha_verificacion)));   // c29
+      if (v.ped) notas.push(UI.chipPedido(v));   // c48
       if (v.antiguedad_dias > 365) notas.push(h('span', { class: 'chip viejo' }, 'medido hace más de 1 año'));
       return fila(T().rutaVano(v), [td(h('a', { href: T().rutaVano(v) }, pqs(v.piquete_desde, v.piquete_hasta)), 'pq'), td(km(v.ki), 'nw'), td(nf(v.L, 1), 'n'), td(h('b', null, mm(v.val)), 'n'), td(estChip(v.estado)),
         td(v.fecha_dato ? [h('span', { class: 'nw' }, UI.fecha(v.fecha_dato)), peq(hace(v.fecha_dato))] : dim('—')),
@@ -4633,6 +4651,10 @@ if (typeof module !== "undefined") module.exports = { combinadas: combinadas, el
     var cids = {}; vs.forEach(function (v) { if (v.canton_id) cids[v.canton_id] = 1; });
     if (tec && Object.keys(cids).length > 1) notas.push(h('div', { class: 'rd-aviso gris' }, h('b', null, 'Número de cantón repetido en la planilla (' + Object.keys(cids).length + ' marcas «cantón ' + C.n + '» en esta vía): '), 'se muestran juntas hasta corregir la planilla (s08).'));
     var av = avisosVanos(M, vs, tec ? null : 'consulta'); if (av) notas.push(av);
+    var peds = []; vs.forEach(function (v) { if (v.ped && peds.indexOf(v.ped) < 0) peds.push(v.ped); });   // c48
+    if (peds.length) notas.push(h('div', { class: 'rd-aviso ped' }, h('b', null, 'En verificación desde el ' + UI.fecha(peds[0].pedido_en) + ': '), peds.map(function (p, k) {
+      return [k ? '; ' : '', h('a', { href: '#/campo/pedido/' + p.id }, p.piquete_desde + ' → ' + p.piquete_hasta), p.pedido_nombre ? ' (' + p.pedido_nombre + ')' : ''];
+    }), '. No cambia el estado.'));
     b.push(avisoParciales(M));
     if (notas.length) b.push(h('div', { class: 'rd-avisos' }, notas));
     if (tec) b.push(kpis(r, null));
@@ -5073,6 +5095,7 @@ if (typeof module !== "undefined") module.exports = { combinadas: combinadas, el
     if (v.lectura_descartada) n.push(h('span', { class: 'chip desc' }, 'lectura descartada'));
     if (v.hilo_intervenido_despues) n.push(h('span', { class: 'chip' }, 'hilo intervenido ' + UI.fecha(v.hilo_intervenido_despues)));
     if (v.fuente === 'calibre') n.push(h('span', { class: 'chip vig' }, 'calibre ' + UI.fecha(v.fecha_verificacion)));   // c29
+    if (v.ped) n.push(UI.chipPedido(v));   // c48
     return n;
   }
 
@@ -5616,7 +5639,7 @@ if (typeof module !== "undefined") module.exports = { combinadas: combinadas, el
     var sub = 'Tramo ' + vn.tramo + ' · ' + UI.nombreVia(via) + (seg ? ' · ' + seg.nombre : '') + (canton ? ' · Cantón ' + canton.numero : ' · sin cantón') + ' · ' + UI.km(vn.km_inicio) + ' a ' + UI.num(vn.km_fin, 3) +
               (vn.largo_m != null ? ' · ' + UI.num(vn.largo_m, 1) + ' m' : '') + (sec ? ' · ' + sec + ' mm²' : '');
     var tec = !!ctx.tec;   // s42 (perfiles): Consulta ve la ficha limpia; con sesión, todo lo técnico
-    var campo = h('div', { hidden: true });
+    var campo = h('div', { hidden: true }), pedido = h('div', { hidden: true });   // c48: «en verificación desde…»
     if (!tec) sub = vn.largo_m != null ? 'Largo del vano: ' + UI.num(vn.largo_m, 1) + ' m' : null;
     var bloques = [
       h('div', { class: 'rd-cab' }, h('div', null, h('h1', null, 'Vano ', h('span', { class: 'mono rd-h1pq' }, vn.piquete_desde + ' – ' + vn.piquete_hasta)), sub ? h('p', { class: 'sub' }, sub) : null),
@@ -5625,6 +5648,7 @@ if (typeof module !== "undefined") module.exports = { combinadas: combinadas, el
           h('a', { class: 'btn sec chico', href: sig ? T().rutaVano(sig) : null, 'aria-disabled': sig ? null : 'true', title: 'Vano siguiente' }, (sig ? sig.piquete_desde : 'siguiente') + ' →'),
           h('a', { class: 'btn chico', href: rutaInf }, 'Informe del vano'),
           window.PantallaCampo ? PantallaCampo.botones(ctx, Rutas.hacia('vano', UI.viaARuta(via), vn.piquete_desde), rutaInf.indexOf('?') >= 0 ? rutaInf.slice(rutaInf.indexOf('?')) : '') : null)),   // c29
+      pedido,
       otros.length ? h('div', { class: 'msg info', role: 'status' }, 'Del piquete ' + cod + ' también arranca ', otros.map(function (x, k) {
         return [k ? ' y ' : '', h('a', { href: rutaFicha(x) }, 'el vano ' + x.piquete_desde + ' → ' + x.piquete_hasta + ' (tramo ' + x.tramo + ')')];
       }), ' (bifurcación: hojas distintas de la planilla).') : null,
@@ -5637,6 +5661,7 @@ if (typeof module !== "undefined") module.exports = { combinadas: combinadas, el
       campo   // c29: verificaciones e intervenciones cargadas en campo (se completa abajo)
     ];
     ctx.el.replaceChildren.apply(ctx.el, bloques);
+    if (window.PantallaCampo && ctx.sesion && ctx.sesion.rol) PantallaCampo.avisoPedido(ctx, vn).then(function (b) { if (b && pedido.isConnected) pedido.replaceWith(b); else pedido.remove(); });   // c48
     if (window.PantallaCampo) PantallaCampo.bloqueVano(ctx, vn).then(function (b) { if (b && campo.isConnected) campo.replaceWith(b); else campo.remove(); });
   }
 
@@ -6030,6 +6055,7 @@ if (typeof module !== "undefined") module.exports = { combinadas: combinadas, el
     if (op && v.lectura_descartada) n.push(h('span', { class: 'chip desc' }, 'lectura descartada'));
     if (v.hilo_intervenido_despues) n.push(h('span', { class: 'chip' }, 'hilo intervenido ' + UI.fecha(v.hilo_intervenido_despues)));
     if (v.fuente === 'calibre') n.push(h('span', { class: 'chip vig', title: 'El estado sale de una verificación en campo con calibre' }, 'calibre ' + UI.fecha(v.fecha_verificacion)));   // c29
+    if (v.ped) n.push(UI.chipPedido(v));   // c48
     return n;
   }
   function textoNotas(v) {
@@ -6039,6 +6065,7 @@ if (typeof module !== "undefined") module.exports = { combinadas: combinadas, el
     if (op && v.lectura_descartada) n.push('se descartó una lectura aislada como dato erróneo: revisar con el personal de catenaria');
     if (v.hilo_intervenido_despues) n.push('hilo intervenido el ' + UI.fecha(v.hilo_intervenido_despues) + ', después del dato');
     if (v.fuente === 'calibre') n.push('verificado con calibre el ' + UI.fecha(v.fecha_verificacion));   // c29
+    if (v.ped) n.push('en verificación desde ' + UI.fecha(v.ped.pedido_en));   // c48
     return n.join('; ');
   }
 
@@ -6272,7 +6299,7 @@ if (typeof module !== "undefined") module.exports = { combinadas: combinadas, el
       d: 'El equipo midió un valor bajo, pero hay que confirmarlo antes de decidir.',
       que: 'mandar a verificar en campo y avisar el resultado (al Coordinador o a la Jefatura) para que se cargue como real o como error del equipo.' },
     sininfo: { t: 'Sin información reciente', q: '¿Dónde no sé cómo está el hilo?', color: '#757575',
-      d: 'Vanos sin medición válida o con la última de hace más de un año.',
+      d: 'Vanos sin medición válida, nunca medidos o con la última medición de hace más de un año.',
       que: 'no son vanos en mal estado: son vanos de los que no hay dato actual. Sirve para pedir una medición o una inspección de la zona.' }
   };
   // Direcciones viejas (Inicio, Por piquetes, enlaces guardados) → listado nuevo
@@ -6282,7 +6309,7 @@ if (typeof module !== "undefined") module.exports = { combinadas: combinadas, el
   var EN = {
     atender: function (v) { return v.estado === 'critico' || v.estado === 'alerta'; },
     verificar: function (v) { return !!v.revisar || parcialAVerificar(v); },
-    sininfo: function (v) { return v.estado === 'sin_dato' || v.antiguedad_dias > 365; }
+    sininfo: function (v) { return v.estado === 'sin_dato' || v.estado === 'nunca_medido' || v.antiguedad_dias > 365; }   // c34: también los nunca medidos
   };
   function nomVia(via) { return { ASC: 'ascendente', DESC: 'descendente' }[via] || ('vía ' + String(via).replace(/^V/, '')); }
   function donde(v) { return 'Tramo ' + v.tramo + ' · ' + nomVia(v.via) + (v.cnum != null ? ' · cantón ' + v.cnum : ''); }
@@ -6319,6 +6346,7 @@ if (typeof module !== "undefined") module.exports = { combinadas: combinadas, el
     return m;
   }
   function porQueSinInfo(v) {
+    if (v.estado === 'nunca_medido') return 'Ninguna medición publicada pasó por este vano';   // c34
     if (v.estado === 'sin_dato') return v.fecha_ultimo_recorrido ? 'El equipo pasó el ' + UI.fecha(v.fecha_ultimo_recorrido) + ' y no pudo medir' : 'El equipo pasó y no pudo medir';
     if (v.ultimo_recorrido_sin_dato && v.fecha_ultimo_recorrido) return 'Las pasadas siguientes no pudieron medir (última: ' + UI.fecha(v.fecha_ultimo_recorrido) + ')';
     return 'No se volvió a medir desde entonces';
@@ -6356,7 +6384,7 @@ if (typeof module !== "undefined") module.exports = { combinadas: combinadas, el
         var f = filas[i], v = f.v;
         tbody.appendChild(h('tr', { class: f.fila },
           td('Vano', h('a', { href: T().rutaVano(v) }, T().nombreVano(v)), 'vano'),
-          td('Dónde', donde(v)),
+          td('Dónde', [donde(v), v.ped ? h('div', null, UI.chipPedido(v)) : null]),   // c48: «en verificación desde dd-mm»
           f.celdas.map(function (c, j) { var col = cols[j + 2]; return td(col, c, (numCol[col] ? 'num' : '') + (col === 'Altura del hilo' ? ' fuerte' : '')); })));
       }
       mostrados = hasta;
@@ -6427,7 +6455,8 @@ if (typeof module !== "undefined") module.exports = { combinadas: combinadas, el
       verificar: [h('span', { class: 'chip' }, UI.num(c(function (v) { return v.revisar; }), 0) + ' dato a confirmar'),
                   h('span', { class: 'chip' }, UI.num(c(parcialAVerificar), 0) + ' medidos solo en parte')],
       sininfo: [h('span', { class: 'chip' }, UI.num(c(function (v) { return v.estado === 'sin_dato'; }), 0) + ' sin medición válida'),
-                h('span', { class: 'chip' }, UI.num(c(function (v) { return v.antiguedad_dias > 365; }), 0) + ' medidos hace más de 1 año')]
+                h('span', { class: 'chip' }, UI.num(c(function (v) { return v.antiguedad_dias > 365; }), 0) + ' medidos hace más de 1 año'),
+                c(function (v) { return v.estado === 'nunca_medido'; }) ? h('span', { class: 'chip' }, UI.num(c(function (v) { return v.estado === 'nunca_medido'; }), 0) + ' nunca medidos') : null]   // c34
     };
     var tarjetas = Object.keys(PREG).map(function (k) {
       var n = c(EN[k]);
@@ -7904,6 +7933,13 @@ if (typeof module !== "undefined") module.exports = { combinadas: combinadas, el
         'Cuando la guardia mide con calibre, la planilla escaneada se le manda por mail al operador, que carga las lecturas. Así el vano se actualiza y el ⚑ se cierra.',
         'Después revisá en «En campo» lo cargado de tu tramo: si no coincide con la planilla, avisale al operador para que lo corrija.'],
         ir: ['#/listados/verificar', 'Ir a Para verificar'] },
+      { id: 'pedido', para: 'pide', q: '¿Cómo mando a verificar un vano o un cantón?', pasos: [   // c48
+        'Entrá a la ficha del vano (o a la pantalla del cantón) y tocá «Pedir verificación».',
+        'Elegí el sector (desde el piquete, hasta el piquete) y, si querés, escribí qué mirar. Tocá «Pedir la verificación».',
+        'No cambia el estado del vano ni manda mails: en la ficha y en los listados el vano queda «en verificación desde» la fecha, y los operadores lo ven con un número junto a «En campo».',
+        'Se cierra solo cuando el operador carga la verificación con calibre de ese sector. Si no hizo falta medir, el operador lo cierra con el motivo.',
+        'Si lo pediste por error, abrilo en «En campo» → Pedidos de verificación y tocá «Cancelar el pedido» con el motivo.'],
+        ir: ['#/campo', 'Ir a En campo'] },
       { id: 'calibre', para: 'informa', q: '¿Cómo cargo una verificación con calibre?', pasos: [
         'Las lecturas llegan por mail: la planilla de la guardia, escaneada, que manda el jefe de base. Tenela abierta mientras cargás.',
         'Entrá a la ficha del vano (o a la pantalla del cantón) y tocá «Informar verificación».',
@@ -7911,6 +7947,13 @@ if (typeof module !== "undefined") module.exports = { combinadas: combinadas, el
         'Cargá cada lectura: piquete, metros y la altura en mm. Podés usar «Agregar posiciones cada 5 m» y llenar solo los mm, o pegar varias lecturas de una planilla. Enter pasa a la siguiente.',
         'Tocá «Revisar antes de guardar»: la app muestra cómo queda cada vano (por ejemplo «pasa de En alerta a Normal»). Revisá los valores, tildá y guardá.',
         'Queda con tu nombre y la fecha. Si te equivocaste, abrila en «En campo» y anulala con el motivo; después cargala de nuevo.'],
+        ir: ['#/campo', 'Ir a En campo'] },
+      { id: 'pedidoop', para: 'informa', q: '¿Qué hago con un pedido de verificación?', pasos: [   // c48
+        'El número junto a «En campo» (en el celular, en «Más») suma los pedidos de verificación pendientes.',
+        'En «En campo» → Pedidos de verificación, tocá el pedido: dice quién lo pidió, el sector y qué mirar.',
+        'Cuando llegue la planilla de la guardia, tocá «Cargar la verificación» y cargala como siempre: al guardarla, el pedido se cierra solo.',
+        'Si no hizo falta medir (ya estaba verificado, se intervino el hilo, etc.), abrí «Cerrar sin cargar la verificación» y escribí el motivo.',
+        'Si se anula la verificación que cerró un pedido, el pedido vuelve a quedar pendiente.'],
         ir: ['#/campo', 'Ir a En campo'] },
       { id: 'resultado', para: 'informa', q: '¿Cómo cambia el estado del vano con el calibre?', pasos: [
         'El vano queda con el valor más bajo entre las lecturas del calibre y lo que midió el Geismar fuera del sector verificado.',
@@ -7928,10 +7971,11 @@ if (typeof module !== "undefined") module.exports = { combinadas: combinadas, el
       { id: 'campo', para: 'todos', q: '¿Qué es «En campo»?', pasos: [
         'Es la lista de verificaciones con calibre e intervenciones que cargaron los operadores y administradores, con quién y cuándo.',
         'Tocá una para ver las lecturas, cómo quedó cada vano y el gráfico.',
-        'En la ficha de cada vano, «En campo» muestra lo que se cargó en ese vano.'],
+        'En la ficha de cada vano, «En campo» muestra lo que se cargó en ese vano.',
+        'Arriba están los pedidos de verificación: sectores que un jefe de base o Coordinación mandó a verificar. No cambian el estado; se ven como «en verificación desde».'],
         ir: ['#/campo', 'Ir a En campo'] },
       { id: 'sininfo', para: 'todos', q: '¿Dónde no hay información reciente?', pasos: [
-        'Listados → Sin información reciente: vanos sin medición válida o con la última de hace más de 1 año.',
+        'Listados → Sin información reciente: vanos sin medición válida, nunca medidos o con la última medición de hace más de 1 año.',
         'Sirve para pedir que se incluyan en la próxima medición del Geismar.'],
         ir: ['#/listados/sininfo', 'Ir a Sin información reciente'] },
       { id: 'piquete', para: 'todos', q: '¿Cómo busco un piquete o una estación?', pasos: [
@@ -8053,7 +8097,7 @@ if (typeof module !== "undefined") module.exports = { combinadas: combinadas, el
     if (!ctx.vigente()) return;
     var adm = Conexion.puede(ctx.sesion, 'administrar');
     var lista = preguntas(ref && !ref.error ? ref : null).filter(function (p) {
-      return p.para === 'todos' || (p.para === 'informa' && Conexion.puede(ctx.sesion, 'informar')) || (p.para === 'operador' && ctx.tec) || (p.para === 'admin' && adm);
+      return p.para === 'todos' || (p.para === 'pide' && Conexion.puede(ctx.sesion, 'pedir')) || (p.para === 'informa' && Conexion.puede(ctx.sesion, 'informar')) || (p.para === 'operador' && ctx.tec) || (p.para === 'admin' && adm);
     });
     var abrir = ctx.query.p || null;
     function item(p) {
@@ -8062,7 +8106,7 @@ if (typeof module !== "undefined") module.exports = { combinadas: combinadas, el
         h('ol', null, p.pasos.map(function (t) { return h('li', null, t); })),
         p.ir ? h('div', { class: 'ay-ir' }, h('a', { class: 'btn chico', href: p.ir[0] }, p.ir[1])) : null);
     }
-    var generales = lista.filter(function (p) { return p.para === 'todos'; }).map(item);
+    var generales = lista.filter(function (p) { return p.para === 'todos' || p.para === 'pide'; }).map(item);
     var campo = lista.filter(function (p) { return p.para === 'informa'; }).map(item);   // c29
     var tecnicas = lista.filter(function (p) { return p.para === 'operador' || p.para === 'admin'; }).map(item);
     ctx.el.replaceChildren(
@@ -8335,6 +8379,12 @@ if (typeof module !== "undefined") module.exports = { combinadas: combinadas, el
  *   Informar intervención   #/vano/<vía>/<piquete>/intervencion[?hasta=]   #/tramo/<n>/<vía>/canton/<n>/intervencion[?entre=]
  *   Listado                 #/campo[?tipo=&tramo=&ver=]
  *   Detalle                 #/campo/verificacion/<id>   #/campo/intervencion/<id>
+ *   Pedir verificación      #/vano/<vía>/<piquete>/pedir[?hasta=]          #/tramo/<n>/<vía>/canton/<n>/pedir[?entre=]      (c48)
+ *   Pedido                  #/campo/pedido/<id>
+ *
+ * c48 (Sebastián, 25/10/2026): el jefe de base (o Coordinación, o un administrador) manda a verificar un vano o un cantón.
+ * No cambia el estado. Los operadores lo ven pendiente (contador junto a «En campo»); se cierra solo al cargar una verificación
+ * con calibre que toca el sector, o lo cierra un operador con motivo. Quien lo pidió (o un administrador) lo cancela. Script 18.
  *
  * Quién informa: Administrador y Operador. c40 (orden de la Coordinación, 23/10/2026): Análisis y gestión (Coordinación, jefes de base, asistentes) solo consulta.
  * La regla la aplica la base (script 08): por vano, valor nuevo = mínimo entre las lecturas del calibre del sector y lo del
@@ -8389,7 +8439,7 @@ if (typeof module !== "undefined") module.exports = { combinadas: combinadas, el
     var vs = todos.slice(Math.max(0, i0 - extra), Math.min(todos.length, i1 + extra + 1));
     var pqs = vs.map(function (x) { return { cod: x.piquete_desde, km: x.ki, largo: (x.kf - x.ki) * 1000, vano: x }; });
     var ult = vs[vs.length - 1]; pqs.push({ cod: ult.piquete_hasta, km: ult.kf, largo: 0, vano: null });
-    miga.push({ texto: que === 'verificar' ? 'Informar verificación' : 'Informar intervención' });
+    miga.push({ texto: que === 'verificar' ? 'Informar verificación' : que === 'pedir' ? 'Pedir verificación' : 'Informar intervención' });
     ctx.miga(miga);
     return { M: M, ref: ref, foco: foco, vs: vs, pqs: pqs, rec: foco[0].recorrido, via: foco[0].via, tramo: foco[0].tramo, back: back, nom: nom };
   }
@@ -8685,7 +8735,9 @@ if (typeof module !== "undefined") module.exports = { combinadas: combinadas, el
     ctx.miga([{ texto: 'En campo' }]);
     var adm = Conexion.puede(ctx.sesion, 'administrar'), q = ctx.query;
     ctx.el.replaceChildren(UI.encabezado('En campo', 'Verificaciones con calibre e intervenciones informadas por operadores y administradores.'), h('div', { class: 'cargando' }, 'Leyendo…'));
+    var rp = Conexion.leer('v_pedido_verificacion', { orden: ['pedido_en', false], limite: 500 });   // c48 (sin el script 18: sin tarjeta)
     var r = await Conexion.leer('v_campo', { orden: ['cargo_en', false], limite: 1000 });
+    rp = await rp;
     if (!ctx.vigente()) return;
     if (r.error) return Pantallas.errorBase(ctx, /v_campo|does not exist|relation/i.test(r.error) ? 'Falta correr en Supabase el script 08 (base/08_campo.sql).' : r.error);
     var todo = r.datos;
@@ -8733,12 +8785,142 @@ if (typeof module !== "undefined") module.exports = { combinadas: combinadas, el
     }
     ctx.el.replaceChildren(
       UI.encabezado('En campo', 'Verificaciones con calibre e intervenciones informadas por operadores y administradores.'),
+      rp.error ? null : tarjetaPedidos(ctx, rp.datos, q.ped === 'todos'),   // c48
       h('div', { class: 'selects acciones' }, sT, sTr, sV, Ayuda.boton('campo', 'Ayuda: En campo')),
       adm && sinVer.length ? h('div', { class: 'rd-aviso' }, h('b', null, UI.plural(sinVer.length, 'registro', 'registros') + ' sin ver por un administrador. '), 'Revisá en especial los que cambian el estado de un vano.') : null,
       UI.card(null, null, lista.length ? T().tabla([{ t: 'Fecha' }, { t: 'Qué' }, { t: 'Dónde' }, { t: 'Resultado' }, { t: 'Cargó' }, { t: 'Estado' }], filas, 'cf-lista')
         : h('p', { class: 'nota', style: 'margin:0' }, todo.length ? 'Nada con estos filtros.' : 'Todavía no se cargó ninguna verificación ni intervención. Se informan desde la ficha de un vano o la pantalla de un cantón.'),
         marcar ? h('div', { class: 'acciones' }, marcar) : null),
       h('p', { class: 'nota' }, 'Para informar: entrá a la ficha de un vano o a la pantalla de un cantón y tocá «Informar verificación» o «Informar intervención».'));
+  }
+
+  // ------------------------------------------------------------------
+  // c48: pedidos de verificación
+  // ------------------------------------------------------------------
+  var CIERRE_N = { calibre: 'se cargó la verificación', operador: 'cerrado sin cargar', cancelado: 'cancelado' };
+  function quienPidio(x) { return (x.pedido_nombre || '—') + (x.pedido_cargo ? ' (' + (CARGO_N[x.pedido_cargo] || x.pedido_cargo) + (x.pedido_base ? ', base ' + x.pedido_base : '') + ')' : ''); }
+  function estPedido(x) {
+    return x.estado === 'pendiente' ? h('span', { class: 'chip ped' }, 'en verificación desde ' + UI.diaMes(x.pedido_en))
+      : h('span', { class: x.estado === 'cancelado' ? 'chip desc' : 'chip vig' }, (CIERRE_N[x.cierre] || x.estado) + ' ' + UI.diaMes(x.cerrado_en));
+  }
+  function tarjetaPedidos(ctx, todos, verTodos) {
+    var pend = todos.filter(function (x) { return x.estado === 'pendiente'; }), lista = verTodos ? todos : pend, op = Conexion.puede(ctx.sesion, 'informar');
+    if (!todos.length && !Conexion.puede(ctx.sesion, 'pedir')) return null;
+    var filas = lista.map(function (x) {
+      var ruta = '#/campo/pedido/' + x.id;
+      return h('tr', { 'data-go': ruta, tabindex: '0' },
+        T().td('Pedido', h('a', { href: ruta }, UI.fecha(x.pedido_en))),
+        T().td('Dónde', ['Tramo ' + (x.tramo || '?') + ' · ' + UI.nombreVia(x.via), h('div', { class: 'rd-peq mono' }, x.piquete_desde + ' → ' + x.piquete_hasta + ' · ' + UI.plural(+x.n_vanos || 0, 'vano'))]),
+        T().td('Pidió', [x.pedido_nombre || '—', x.pedido_cargo ? h('div', { class: 'rd-peq' }, (CARGO_N[x.pedido_cargo] || x.pedido_cargo) + (x.pedido_base ? ' · ' + x.pedido_base : '')) : null]),
+        T().td('Qué mirar', x.nota || h('span', { class: 'nota' }, '—')),
+        T().td('Estado', estPedido(x), 'notas'));
+    });
+    var otro = verTodos ? h('a', { href: '#/campo' }, 'Ver solo los pendientes') : todos.length > pend.length ? h('a', { href: '#/campo?ped=todos' }, 'Ver también los cerrados y cancelados') : null;
+    return UI.card('Pedidos de verificación', pend.length ? UI.plural(pend.length, 'pendiente') : 'ninguno pendiente',
+      op && pend.length ? h('div', { class: 'rd-aviso' }, h('b', null, UI.plural(pend.length, 'sector mandado', 'sectores mandados') + ' a verificar en campo. '), 'Se cierran solos al cargar la verificación con calibre; si no hizo falta, cerralo desde el pedido con el motivo.') : null,
+      lista.length ? T().tabla([{ t: 'Pedido' }, { t: 'Dónde' }, { t: 'Pidió' }, { t: 'Qué mirar' }, { t: 'Estado' }], filas, 'cf-pedidos')
+        : h('p', { class: 'nota', style: 'margin:0' }, 'No hay pedidos de verificación pendientes. Los jefes de base y Coordinación los hacen desde la ficha de un vano o la pantalla de un cantón («Pedir verificación»).'),
+      otro ? h('p', { class: 'nota' }, otro) : null);
+  }
+
+  async function pPedir(ctx) {
+    if (!Conexion.puede(ctx.sesion, 'pedir')) {
+      ctx.el.replaceChildren(UI.encabezado('Sin permiso'), UI.mensaje('info', 'Mandan a verificar en campo los jefes de base, Coordinación y los administradores. Con tu perfil podés ver los pedidos en «En campo».'),
+        h('p', null, h('a', { class: 'btn sec chico', href: '#/campo' }, 'Ir a En campo')));
+      return;
+    }
+    var C = await contexto(ctx, 'pedir'); if (!C) return;
+    ctx.titulo('Pedir verificación · ' + C.nom);
+    var ya = C.foco.map(function (v) { return v.ped; }).filter(Boolean)[0];
+    var sDesde = selPiquete(C.pqs, C.foco[0].piquete_desde, 'pv-desde'), sHasta = selPiquete(C.pqs, C.foco[C.foco.length - 1].piquete_hasta, 'pv-hasta');
+    var inNota = h('textarea', { id: 'pv-nota', maxlength: '500', placeholder: 'Ej.: confirmar con calibre el punto bajo de la última medición; mirar el vano antes de la sección.' });
+    var msg = h('div', { role: 'status' }), bt = h('button', { class: 'btn', type: 'button' }, 'Pedir la verificación');
+    bt.addEventListener('click', async function () {
+      bt.disabled = true; msg.replaceChildren(h('div', { class: 'cargando' }, 'Guardando…'));
+      var r = await Conexion.rpc('pedir_verificacion', { datos: { recorrido: C.rec, via: C.via, piquete_desde: sDesde.value, piquete_hasta: sHasta.value, nota: inNota.value.trim() } });
+      if (r.error) { bt.disabled = false; msg.replaceChildren(UI.mensaje('error', /pedir_verificacion|Could not find/i.test(r.error) ? 'Falta correr en Supabase el script 18 (base/18_pedido_verificacion.sql).' : errorBase(r.error))); return; }
+      Mo.limpiar(); if (App.contarPendientes) App.contarPendientes();
+      UI.toast('Pedido guardado: ' + UI.plural(r.datos.vanos, 'vano queda', 'vanos quedan') + ' «en verificación». Los operadores lo ven en En campo.');
+      location.hash = '#/campo/pedido/' + r.datos.id;
+    });
+    ctx.el.replaceChildren(
+      h('div', { class: 'rd-cab' }, h('div', null, h('h1', null, 'Pedir verificación en campo'), h('p', { class: 'sub' }, C.nom + ' · Tramo ' + C.tramo + ' · ' + UI.nombreVia(C.via))),
+        h('div', { class: 'acciones rd-acc' }, h('a', { class: 'btn sec chico', href: C.back }, '← Volver'), Ayuda.boton('pedido', 'Ayuda: pedir una verificación'))),
+      ya ? h('div', { class: 'rd-aviso' }, h('b', null, 'Ya está en verificación desde el ' + UI.fecha(ya.pedido_en) + ' '), '(' + ya.piquete_desde + ' → ' + ya.piquete_hasta + (ya.pedido_nombre ? ', pedido por ' + ya.pedido_nombre : '') + '). ',
+        h('a', { href: '#/campo/pedido/' + ya.id }, 'Ver el pedido'), '. No se puede pedir otra vez un sector que se superpone con uno pendiente.') : null,
+      UI.card('Qué se manda a verificar', null, h('div', { class: 'rd-form' },
+        h('label', { for: 'pv-desde' }, 'Desde el piquete', sDesde),
+        h('label', { for: 'pv-hasta' }, 'hasta el piquete', sHasta),
+        h('label', { for: 'pv-nota', class: 'ancho' }, 'Qué mirar (opcional)', inNota)),
+        h('p', { class: 'nota' }, 'No cambia el estado del vano ni manda mails: los operadores lo ven pendiente en «En campo», con el número junto al menú. Se cierra solo cuando se carga una verificación con calibre que toca este sector; si no hace falta cargarla, un operador lo cierra con el motivo. Mientras tanto, la ficha y los listados muestran «en verificación desde».')),
+      h('div', { class: 'acciones' }, bt), msg);
+  }
+
+  // Ruta para cargar la verificación de un pedido: el vano, o el cantón si el pedido es el cantón entero
+  function rutaVerificarPedido(M, x) {
+    var vs = (M.RV[x.recorrido + '|' + x.via] || []).filter(function (v) { return v.ki < +x.km_hasta - 0.0005 && v.kf > +x.km_desde + 0.0005; });
+    if (!vs.length) return null;
+    var v = vs[0], ruta = Rutas.hacia('vano', UI.viaARuta(v.via), v.piquete_desde) + '/verificar' + (Number(String(v.piquete_desde).split('-')[0]) !== Number(v.tramo) ? '?hasta=' + encodeURIComponent(v.piquete_hasta) : '');
+    if (vs.length > 1 && v.cnum != null && vs.every(function (y) { return y.cnum === v.cnum && y.tramo === v.tramo; })) {
+      var rc = Mo.rutaCantonDeVano(M, v), i = rc.indexOf('?');
+      ruta = i < 0 ? rc + '/verificar' : rc.slice(0, i) + '/verificar' + rc.slice(i);
+    }
+    return { ruta: ruta, vanos: vs };
+  }
+
+  async function pDetPed(ctx) {
+    ctx.miga([{ texto: 'En campo', ruta: '#/campo' }, { texto: 'Pedido N° ' + ctx.params.id }]);
+    if (!/^\d+$/.test(ctx.params.id)) return Pantallas.noEncontrada(ctx, '«' + ctx.params.id + '» no es un número de pedido.');
+    var rs = await Promise.all([Conexion.leer('v_pedido_verificacion', { filtros: [['eq', 'id', Number(ctx.params.id)]] }), ctx.ref().then(function (ref) { return Mo.cargar(ref); })]);
+    if (!ctx.vigente()) return;
+    if (rs[0].error) return Pantallas.errorBase(ctx, /v_pedido_verificacion|does not exist|relation/i.test(rs[0].error) ? 'Falta correr en Supabase el script 18 (base/18_pedido_verificacion.sql).' : rs[0].error);
+    if (rs[1].error) return Pantallas.errorBase(ctx, rs[1].error);
+    var x = rs[0].datos[0]; if (!x) return Pantallas.noEncontrada(ctx, 'No existe el pedido de verificación N° ' + ctx.params.id + '.');
+    ctx.titulo('Pedido de verificación N° ' + x.id);
+    var s = ctx.sesion, op = Conexion.puede(s, 'informar'), pend = x.estado === 'pendiente', V = rutaVerificarPedido(rs[1].M, x);
+    var puedeCancelar = pend && (Conexion.puede(s, 'administrar') || (s && s.id === x.pedido_por && Conexion.puede(s, 'pedir')));
+    function accion(titulo, texto, rpcNombre, minimo, ph, rotulo) {
+      var ta = h('textarea', { id: 'pd-' + rpcNombre, placeholder: ph }), bt = h('button', { class: 'btn sec chico', type: 'button' }, rotulo), m = h('div', { role: 'status' });
+      bt.addEventListener('click', async function () {
+        if (ta.value.trim().length < minimo) { m.replaceChildren(UI.mensaje('error', 'Escribí el motivo (mínimo ' + minimo + ' caracteres).')); return; }
+        bt.disabled = true;
+        var r = await Conexion.rpc(rpcNombre, { id: x.id, motivo: ta.value.trim() });
+        if (r.error) { m.replaceChildren(UI.mensaje('error', errorBase(r.error))); bt.disabled = false; return; }
+        Mo.limpiar(); if (App.contarPendientes) App.contarPendientes();
+        UI.toast(rpcNombre === 'cancelar_pedido_verificacion' ? 'Pedido cancelado.' : 'Pedido cerrado.'); App.navegar();
+      });
+      return h('details', { class: 'card cf-anular' }, h('summary', null, titulo), h('p', { class: 'nota' }, texto),
+        h('div', { class: 'rd-form' }, h('label', { for: 'pd-' + rpcNombre, class: 'ancho' }, 'Motivo', ta)), h('div', { class: 'acciones' }, bt), m);
+    }
+    var vs = V ? V.vanos : [];
+    ctx.el.replaceChildren(
+      h('div', { class: 'rd-cab' }, h('div', null, h('h1', null, 'Pedido de verificación N° ' + x.id), h('p', { class: 'sub' }, 'Tramo ' + (x.tramo || '?') + ' · ' + UI.nombreVia(x.via) + ' · pedido el ' + UI.fecha(x.pedido_en))),
+        h('div', { class: 'acciones rd-acc' }, h('a', { class: 'btn sec chico', href: '#/campo' }, '← En campo'),
+          pend && op && V ? h('a', { class: 'btn chico', href: V.ruta }, 'Cargar la verificación') : null)),
+      pend ? h('div', { class: 'rd-aviso' }, h('b', null, 'En verificación desde el ' + UI.fecha(x.pedido_en) + '. '), 'No cambia el estado de los vanos.' + (op ? ' Al guardar una verificación con calibre que toque este sector, el pedido se cierra solo.' : ''))
+        : UI.mensaje('info', x.estado === 'cancelado' ? 'Cancelado por ' + (x.cerrado_nombre || '—') + ' el ' + UI.fecha(x.cerrado_en) + ': «' + (x.motivo_cierre || '') + '».'
+          : x.cierre === 'calibre' ? ['Cerrado el ' + UI.fecha(x.cerrado_en) + ': ', h('a', { href: '#/campo/verificacion/' + x.verificacion_id }, x.motivo_cierre || 'verificación N° ' + x.verificacion_id), x.cerrado_nombre ? ' (cargó ' + x.cerrado_nombre + ').' : '.']
+          : 'Cerrado sin cargar la verificación por ' + (x.cerrado_nombre || '—') + ' el ' + UI.fecha(x.cerrado_en) + ': «' + (x.motivo_cierre || '') + '».'),
+      UI.card('Datos', estPedido(x), h('dl', { class: 'datos' },
+        h('dt', null, 'Sector'), h('dd', { class: 'mono' }, x.piquete_desde + ' → ' + x.piquete_hasta),
+        h('dt', null, 'Progresiva'), h('dd', null, UI.km(x.km_desde) + ' a ' + UI.num(x.km_hasta, 3) + ' (' + UI.num((x.km_hasta - x.km_desde) * 1000, 0) + ' m)'),
+        h('dt', null, 'Pidió'), h('dd', null, quienPidio(x) + ' el ' + UI.fecha(x.pedido_en)),
+        x.base ? [h('dt', null, 'Base del sector'), h('dd', null, x.base)] : null,
+        h('dt', null, 'Qué mirar'), h('dd', { style: 'white-space:pre-wrap' }, x.nota || '—'))),
+      vs.length ? UI.card('Vanos del sector', UI.plural(vs.length, 'vano'), h('ul', { class: 'lista-vanos' }, vs.map(function (v) {
+        return h('li', null, h('a', { href: T().rutaVano(v) }, h('span', { class: 'lv-n' }, v.piquete_desde + ' → ' + v.piquete_hasta), ' ', UI.chipEstado(v.estado), v.val != null ? h('span', { class: 'nota' }, ' · ' + UI.mm(v.val)) : null));
+      }))) : null,
+      pend && op ? accion('Cerrar sin cargar la verificación', 'Para cuando no hizo falta medir (por ejemplo, ya se había verificado o el sector se intervino). Queda tu nombre, la fecha y el motivo.', 'cerrar_pedido_verificacion', 10, 'Ej.: se miró en la ronda del 26-10 y el hilo está bien; no hizo falta medir.', 'Cerrar el pedido') : null,
+      puedeCancelar ? accion('Cancelar el pedido', 'Si se pidió por error o ya no hace falta. Queda tu nombre, la fecha y el motivo.', 'cancelar_pedido_verificacion', 5, 'Ej.: lo pedí en la vía equivocada.', 'Cancelar el pedido') : null);
+  }
+
+  // Aviso arriba en la ficha del vano: «en verificación desde …»
+  async function avisoPedido(ctx, v) {
+    var r = await Conexion.leer('v_pedido_verificacion', { filtros: [['eq', 'estado', 'pendiente'], ['eq', 'recorrido', v.recorrido], ['eq', 'via', v.via], ['lt', 'km_desde', v.km_fin], ['gt', 'km_hasta', v.km_inicio]], orden: ['pedido_en'] });
+    if (r.error || !r.datos.length) return null;
+    var x = r.datos[0];
+    return h('div', { class: 'rd-aviso ped', role: 'status' }, h('b', null, 'En verificación desde el ' + UI.fecha(x.pedido_en) + '. '),
+      'Lo pidió ' + quienPidio(x) + (x.nota ? ': «' + x.nota + '»' : '') + '. No cambia el estado. ', h('a', { href: '#/campo/pedido/' + x.id }, Conexion.puede(ctx.sesion, 'informar') ? 'Ver el pedido y cargar la verificación' : 'Ver el pedido'));
   }
 
   // ------------------------------------------------------------------
@@ -8869,8 +9051,10 @@ if (typeof module !== "undefined") module.exports = { combinadas: combinadas, el
   // Piezas para la Ficha y el Cantón
   // ------------------------------------------------------------------
   function botones(ctx, rutaBase, sufijo) {
-    if (!Conexion.puede(ctx.sesion, 'informar')) return null;
-    return [h('a', { class: 'btn sec chico', href: rutaBase + '/verificar' + (sufijo || '') }, 'Informar verificación'), h('a', { class: 'btn sec chico', href: rutaBase + '/intervencion' + (sufijo || '') }, 'Informar intervención')];
+    var b = [];
+    if (Conexion.puede(ctx.sesion, 'informar')) b.push(h('a', { class: 'btn sec chico', href: rutaBase + '/verificar' + (sufijo || '') }, 'Informar verificación'), h('a', { class: 'btn sec chico', href: rutaBase + '/intervencion' + (sufijo || '') }, 'Informar intervención'));
+    if (Conexion.puede(ctx.sesion, 'pedir')) b.push(h('a', { class: 'btn sec chico', href: rutaBase + '/pedir' + (sufijo || '') }, 'Pedir verificación'));   // c48
+    return b.length ? b : null;
   }
   // Lo cargado en campo que toca un sector (para la Ficha)
   async function bloqueVano(ctx, v) {
@@ -8891,11 +9075,14 @@ if (typeof module !== "undefined") module.exports = { combinadas: combinadas, el
   Rutas.definir('/vano/:via/:piquete/intervencion', { pantalla: pIntervencion, titulo: 'Informar intervención', pestana: 'campo', requiere: 'usuario' });
   Rutas.definir('/tramo/:tramo/:via/canton/:canton/verificar', { pantalla: pVerificar, titulo: 'Informar verificación', pestana: 'campo', requiere: 'usuario' });
   Rutas.definir('/tramo/:tramo/:via/canton/:canton/intervencion', { pantalla: pIntervencion, titulo: 'Informar intervención', pestana: 'campo', requiere: 'usuario' });
+  Rutas.definir('/vano/:via/:piquete/pedir', { pantalla: pPedir, titulo: 'Pedir verificación', pestana: 'campo', requiere: 'usuario' });   // c48
+  Rutas.definir('/tramo/:tramo/:via/canton/:canton/pedir', { pantalla: pPedir, titulo: 'Pedir verificación', pestana: 'campo', requiere: 'usuario' });
+  Rutas.definir('/campo/pedido/:id', { pantalla: pDetPed, titulo: 'Pedido de verificación', pestana: 'campo', requiere: 'usuario' });
   Rutas.definir('/campo', { pantalla: pLista, titulo: 'En campo', pestana: 'campo', requiere: 'usuario' });
   Rutas.definir('/campo/verificacion/:id', { pantalla: pDetVer, titulo: 'Verificación', pestana: 'campo', requiere: 'usuario' });
   Rutas.definir('/campo/intervencion/:id', { pantalla: pDetInt, titulo: 'Intervención', pestana: 'campo', requiere: 'usuario' });
 
-  global.PantallaCampo = { botones: botones, bloqueVano: bloqueVano, minFuera: minFuera, TIPO_N: TIPO_N };
+  global.PantallaCampo = { botones: botones, bloqueVano: bloqueVano, avisoPedido: avisoPedido, minFuera: minFuera, TIPO_N: TIPO_N };
 })(window);
 
 
@@ -9424,11 +9611,22 @@ if (typeof module !== "undefined") module.exports = { combinadas: combinadas, el
   }
 
   // c29: para los administradores, verificaciones e intervenciones cargadas en campo que todavía nadie vio (pendientes_campo(), script 08)
+  // c48: más, para operadores y administradores, los pedidos de verificación pendientes (pendientes_verificacion(), script 18)
   async function contarCampo() {
-    if (!Conexion.puede(estado.sesion, 'administrar')) { estado.campo = null; return; }
-    var r = await Conexion.rpc('pendientes_campo');
-    estado.campo = r.error || !r.datos ? null : (r.datos.verificaciones || 0) + (r.datos.intervenciones || 0);
+    var adm = Conexion.puede(estado.sesion, 'administrar'), op = Conexion.puede(estado.sesion, 'informar');
+    if (!op) { estado.campo = null; estado.campoDet = null; return; }
+    var rs = await Promise.all([adm ? Conexion.rpc('pendientes_campo') : { datos: null }, Conexion.rpc('pendientes_verificacion')]);
+    var sinVer = rs[0].error || !rs[0].datos ? 0 : (rs[0].datos.verificaciones || 0) + (rs[0].datos.intervenciones || 0);
+    var ped = rs[1].error || typeof rs[1].datos !== 'number' ? 0 : rs[1].datos;   // sin el script 18: 0
+    estado.campoDet = { sinVer: sinVer, pedidos: ped };
+    estado.campo = sinVer + ped || null;
     dibujarBarras();
+  }
+  function textoCampo() {
+    var d = estado.campoDet || {}, t = [];
+    if (d.pedidos) t.push(UI.plural(d.pedidos, 'pedido de verificación pendiente', 'pedidos de verificación pendientes'));
+    if (d.sinVer) t.push(d.sinVer + ' sin ver por un administrador');
+    return t.join(' · ');
   }
 
   // ------------------------------------------------------------------
@@ -9453,7 +9651,7 @@ if (typeof module !== "undefined") module.exports = { combinadas: combinadas, el
     return estado.pendientes ? h('span', { class: 'cont', 'aria-label': estado.pendientes + ' pendientes' }, estado.pendientes) : null;
   }
   function contadorCampo() {
-    return estado.campo ? h('span', { class: 'cont', 'aria-label': estado.campo + ' sin ver', title: 'Cargado en campo que todavía ningún administrador vio' }, estado.campo) : null;
+    return estado.campo ? h('span', { class: 'cont', 'aria-label': textoCampo(), title: textoCampo() }, estado.campo) : null;
   }
   function nombreCorto(s) {
     if (!s) return '';
@@ -9500,7 +9698,7 @@ if (typeof module !== "undefined") module.exports = { combinadas: combinadas, el
       h('a', { href: '#/piquetes', class: on('piquetes'), 'aria-current': cur('piquetes') }, icono('piquetes'), 'Piquetes'),
       h('a', { href: '#/listados', class: on('listados'), 'aria-current': cur('listados') }, icono('listados'), 'Listados'),
       op ? h('a', { href: '#/trabajo', class: on('trabajo'), 'aria-current': cur('trabajo') }, icono('trabajo'), 'Trabajo', contador()) : null,
-      h('button', { type: 'button', class: enMas ? 'on' : null, 'aria-haspopup': 'dialog', onclick: abrirMas }, icono('mas'), 'Más')
+      h('button', { type: 'button', class: enMas ? 'on' : null, 'aria-haspopup': 'dialog', onclick: abrirMas }, icono('mas'), 'Más', contadorCampo())   // c48: en el celular «En campo» está en Más
     ];
     document.getElementById('nav-cel').replaceChildren.apply(document.getElementById('nav-cel'), cel.filter(Boolean));
   }
@@ -9511,7 +9709,7 @@ if (typeof module !== "undefined") module.exports = { combinadas: combinadas, el
       return h('a', { href: href, class: pestanaActual === k ? 'on' : null, onclick: cerrarMas }, t, extra ? h('small', null, extra) : null);
     };
     document.getElementById('hoja-items').replaceChildren.apply(document.getElementById('hoja-items'), [
-      s && s.rol ? it('campo', 'En campo', '#/campo', 'verificaciones e intervenciones' + (estado.campo ? ' · ' + estado.campo + ' sin ver' : '')) : null,   // c29
+      s && s.rol ? it('campo', 'En campo', '#/campo', 'verificaciones e intervenciones' + (estado.campo ? ' · ' + textoCampo() : '')) : null,   // c29
       Conexion.puede(s, 'clasificar') ? it('mediciones', 'Mediciones', '#/mediciones') : null,   // s42: solo operadores y administradores
       adm ? it('admin', 'Administración', '#/admin') : null,
       s && s.rol ? it('ayuda', 'Ayuda', '#/ayuda', 'cómo usar la app') : null,   // c32
