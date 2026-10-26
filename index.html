@@ -1763,7 +1763,10 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       leerEstado().then(function (x) { tE = performance.now() - t0; return x; }),
       Conexion.leerTodo('canton', { columnas: 'id, recorrido, via, numero, km_inicio, km_fin, seccion', filtros: [['eq', 'version_id', ver]] }),
       // c38: además de las estaciones, los tramos neutros (TN) de la planilla, para marcarlos en el gráfico
-      Conexion.leerTodo('marca', { columnas: 'id, recorrido, via, km, tipo, texto', filtros: [['eq', 'version_id', ver], ['in', 'tipo', ['estacion', 'zona_neutra']]] }),
+      // c49: con el fin de cada marca (script 16) y las secciones/cantones con sección, para el TN completo y la transición 170 → 110.
+      //      Sin el 16 se sigue como en c38 (TN como punto, sin transición de la planilla).
+      Conexion.leerTodo('marca', { columnas: 'id, recorrido, via, km, km_hasta, piquete_desde, piquete_hasta, tipo, texto', filtros: [['eq', 'version_id', ver], ['in', 'tipo', ['estacion', 'zona_neutra', 'seccion', 'canton']]] })
+        .then(function (x) { return !x.error ? x : Conexion.leerTodo('marca', { columnas: 'id, recorrido, via, km, tipo, texto', filtros: [['eq', 'version_id', ver], ['in', 'tipo', ['estacion', 'zona_neutra']]] }); }),
       Conexion.leerTodo('medicion', { columnas: 'id, recorrido, via, fecha, etiqueta, seccion, tramos, km_inicio, km_fin, version_piquetes_id, serie(storage_path)', filtros: [['eq', 'estado', 'publicada']] }),
       Conexion.leerTodo('zona_sin_lectura', {}),
       // c29: lecturas de calibre de las verificaciones vigentes (puntos en el gráfico). Si el script 08 no está, se sigue sin ellas.
@@ -1778,22 +1781,38 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
     ]);
     var err = rs.map(function (r) { return r.error; }).filter(Boolean)[0];
     if (err) return { error: err };
-    var M = { ref: ref, V: [], TODOS: [], VID: {}, RV: {}, LIM: {}, faltaLimites: !!rs[7].faltaLimites, CANT: {}, EST: {}, MED: {}, ZON: {}, TRAMO: {}, CAL: {}, TN: {}, CSEC: {}, segs: {}, parcial: null, faltaCampo: !!rs[5].faltaCampo,
+    var M = { ref: ref, V: [], TODOS: [], VID: {}, RV: {}, LIM: {}, faltaLimites: !!rs[7].faltaLimites, CANT: {}, EST: {}, MED: {}, ZON: {}, TRAMO: {}, CAL: {}, TN: {}, CSEC: {}, ZSEC: {}, TRANS: {}, segs: {}, parcial: null, faltaCampo: !!rs[5].faltaCampo,
               faltaSeccion: !!rs[6].faltaSeccion,
               tiempos: { estado: tE, total: performance.now() - t0, via: rs[0].via } };
     ref.tramos.forEach(function (t) { M.TRAMO[t.numero] = t; });
     rs[1].datos.forEach(function (c) { M.CANT[c.id] = c; });
     rs[2].datos.forEach(function (m) {
       if (m.km == null) return; var k = m.recorrido + '|' + m.via;
-      if (m.tipo === 'zona_neutra') (M.TN[k] = M.TN[k] || []).push({ km: +m.km, texto: m.texto });   // c38
-      else (M.EST[k] = M.EST[k] || []).push({ km: +m.km, nombre: nombreEst(m.texto), texto: m.texto });
+      var kh = m.km_hasta != null ? +m.km_hasta : null;
+      if (m.tipo === 'zona_neutra') (M.TN[k] = M.TN[k] || []).push({ km: +m.km, b: kh != null ? Math.max(kh, +m.km) : +m.km, texto: m.texto, pd: m.piquete_desde || null, ph: m.piquete_hasta || null });   // c38 · c49: con su fin
+      else if (m.tipo === 'estacion') (M.EST[k] = M.EST[k] || []).push({ km: +m.km, nombre: nombreEst(m.texto), texto: m.texto });
+      else {   // c49: zona de sección del hilo según la planilla («170 mm», «CANTON 1 (110 mm)»), solo si tiene fin
+        var sc = /(170|110)\s*mm/i.exec(m.texto || '');
+        if (sc && kh != null && kh > +m.km) (M.ZSEC[k] = M.ZSEC[k] || []).push({ km: +m.km, b: kh, sec: +sc[1], pd: m.piquete_desde || null, ph: m.piquete_hasta || null });
+      }
+    });
+    // c49: transición de sección = donde se superponen en la planilla una zona de 170 y una de 110 de la misma vía
+    Object.keys(M.ZSEC).forEach(function (k) {
+      var Z = M.ZSEC[k];
+      Z.forEach(function (z1) { Z.forEach(function (z2) {
+        if (z1.sec !== 170 || z2.sec !== 110) return;
+        var a = Math.max(z1.km, z2.km), b = Math.min(z1.b, z2.b);
+        if (b - a < 0.001) return;
+        var primero = z1.km <= z2.km ? z1 : z2, segundo = primero === z1 ? z2 : z1;
+        (M.TRANS[k] = M.TRANS[k] || []).push({ km: a, b: b, de: primero.sec, al: segundo.sec, pd: segundo.pd, ph: primero.ph });
+      }); });
     });
     rs[6].datos.forEach(function (c) {   // c38: cambio de sección por hoja y vía
       var k = c.recorrido + '|' + c.via;
       (M.CSEC[k] = M.CSEC[k] || []).push({ km: +c.km, a: c.km_desde != null ? +c.km_desde : null, b: c.km_hasta != null ? +c.km_hasta : null,
         de: c.de_seccion, al: c.a_seccion, piquetes: c.piquetes, estado: c.estado, evidencia: c.evidencia });
     });
-    [M.EST, M.TN, M.CSEC].forEach(function (D) { Object.keys(D).forEach(function (k) { D[k].sort(function (a, b) { return a.km - b.km; }); }); });
+    [M.EST, M.TN, M.CSEC, M.TRANS].forEach(function (D) { Object.keys(D).forEach(function (k) { D[k].sort(function (a, b) { return a.km - b.km; }); }); });
     rs[3].datos.forEach(function (m) {
       var s = Array.isArray(m.serie) ? m.serie[0] : m.serie;
       m.storage_path = s ? s.storage_path : null; m.ki = +m.km_inicio; m.kf = +m.km_fin; M.MED[m.id] = m;
@@ -1962,14 +1981,16 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
 
   // c29: lecturas de calibre (verificaciones vigentes) de una hoja y vía entre a y b
   // c38: tramos neutros (planilla) y cambios de sección (datos) de una hoja y vía entre a y b
-  function neutrosEn(M, rec, via, a, b) { return ((M.TN || {})[rec + '|' + via] || []).filter(function (p) { return p.km >= a - 1e-6 && p.km <= b + 1e-6; }); }
+  function neutrosEn(M, rec, via, a, b) { return ((M.TN || {})[rec + '|' + via] || []).filter(function (p) { return (p.b != null ? p.b : p.km) >= a - 1e-6 && p.km <= b + 1e-6; }); }
+  // c49: transiciones de sección de la planilla (170 → 110) que tocan [a, b]
+  function transicionesEn(M, rec, via, a, b) { return ((M.TRANS || {})[rec + '|' + via] || []).filter(function (p) { return p.b >= a - 1e-6 && p.km <= b + 1e-6; }); }
   function seccionesEn(M, rec, via, a, b) { return ((M.CSEC || {})[rec + '|' + via] || []).filter(function (p) { return (p.b != null ? p.b : p.km) >= a - 1e-6 && (p.a != null ? p.a : p.km) <= b + 1e-6; }); }
   // c39: límites del tramo t en una hoja y vía (o null si el script 11 no está)
   function limiteDe(M, rec, via, t) { return ((M.LIM || {})[rec + '|' + via] || []).filter(function (l) { return l.tramo === t; })[0] || null; }
   function calibreEn(M, rec, via, a, b) { return (M.CAL[rec + '|' + via] || []).filter(function (p) { return p.km >= a - 1e-6 && p.km <= b + 1e-6; }); }
 
   global.Modelo = {
-    cargar: cargar, calibreEn: calibreEn, limiteDe: limiteDe, neutrosEn: neutrosEn, seccionesEn: seccionesEn, filtrarEstado: filtrarEstado, limpiar: limpiar, parciales: parciales, minEnVano: minEnVano, nivel: nivel,
+    cargar: cargar, calibreEn: calibreEn, limiteDe: limiteDe, neutrosEn: neutrosEn, transicionesEn: transicionesEn, seccionesEn: seccionesEn, filtrarEstado: filtrarEstado, limpiar: limpiar, parciales: parciales, minEnVano: minEnVano, nivel: nivel,
     viasTramo: viasTramo, vanosTV: vanosTV, segmentos: segmentos, segDeVano: segDeVano, nombreSeg: nombreSeg, cantonesDe: cantonesDe,
     vanosCanton: vanosCanton, segsDeVanos: segsDeVanos, resumen: resumen, secDe: secDe, secTxt: secTxt, medsZona: medsZona, estacionesEn: estacionesEn,
     rutaTramo: rutaTramo, rutaSeg: rutaSeg, rutaCanton: rutaCanton, rutaCantonDeVano: rutaCantonDeVano,
@@ -2002,6 +2023,10 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
  * c45 (24/10/2026): triángulo ▼ en el MÍNIMO DEL VANO que da el estado vigente (v_estado_vano: valor y km), del color del
  *   estado. La curva guarda un punto cada 0,5 m y una caída de una sola lectura puede no verse: el triángulo marca el valor
  *   real. Siempre en alerta y crítico; en normal, solo de cerca. Con lugar, el valor al lado.
+ * c49 (25/10/2026): el TRAMO NEUTRO se dibuja completo (de la primera a la última fila de su celda en la planilla, script 16)
+ *   como franja violeta transparente con «TRAMO NEUTRO» de marca de agua; la TRANSICIÓN 170 → 110 mm² (donde la planilla
+ *   superpone la zona de 170 y la de 110) como franja verde azulada con su marca de agua. Si queda justo antes o después
+ *   de la vía principal, un rótulo en el borde. Con la transición de la planilla, no se dibuja la de los datos (c38).
  * ===================================================================== */
 (function (global) {
   'use strict';
@@ -2028,10 +2053,15 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       todos = todos.filter(function (v) { return v.kf > o.ki - 1e-6 && v.ki < o.kf + 1e-6; });
     }
     var est = (M.EST[o.rec + '|' + o.via] || []);
+    var LP = (function () {   // c49: inicio y fin de la vía principal de esta hoja y vía (para el rótulo del borde)
+      var vp = (M.RV[o.rec + '|' + o.via] || []).filter(function (v) { return o.conFuera || !v.fuera; });
+      return vp.length ? [Math.min.apply(null, vp.map(function (v) { return v.ki; })), Math.max.apply(null, vp.map(function (v) { return v.kf; }))] : [-1e9, 1e9];
+    })();
     var MINS = todos.filter(function (v) { return v.fuente === 'geismar' && v.val != null && v.km_min != null; });   // c45
     var CAL = Mo.calibreEn ? Mo.calibreEn(M, o.rec, o.via, o.ki - 0.5, o.kf + 0.5) : [], verCal = true;
     var TNS = Mo.neutrosEn ? Mo.neutrosEn(M, o.rec, o.via, o.ki - 0.5, o.kf + 0.5) : [];        // c38
-    var CSEC = Mo.seccionesEn ? Mo.seccionesEn(M, o.rec, o.via, o.ki - 0.5, o.kf + 0.5) : [];   // c38
+    var TRS = Mo.transicionesEn ? Mo.transicionesEn(M, o.rec, o.via, o.ki - 0.3, o.kf + 0.3) : [];   // c49: de la planilla
+    var CSEC = TRS.length || !Mo.seccionesEn ? [] : Mo.seccionesEn(M, o.rec, o.via, o.ki - 0.5, o.kf + 0.5);   // c38: de los datos, si la planilla no la tiene
     var A = o.ki, B = o.kf, MIN = Math.min(0.04, B - A), va = A, vb = B;
     var aviso = h('div', { class: 'rd-peq', role: 'status' });
     var botones = h('div', { class: 'rd-meds' }, h('span', { class: 'rd-peq' }, meds.length ? 'Mediciones:' : 'Ninguna medición publicada pasó por esta zona: solo se ve el estado de los vanos.'), meds.map(function (m) {
@@ -2151,8 +2181,13 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
         hijos.push(h('div', null, h('span', { style: 'color:' + col[id] }, '■ '), UI.fecha(M.MED[id].fecha) + ': ' + (q >= 0 ? mm((q + 5000) / 1000) + ' mm' : q === -2 ? 'relleno 15,49 (no medido)' : 'sin lectura')));
       });
       var tolK = Math.max(0.004, 8 / (geo.W - geo.ml - geo.mr) * (vb - va));   // c38: 8 px o 4 m
-      TNS.filter(function (p) { return Math.abs(p.km - k) <= tolK; }).forEach(function (p) {
-        hijos.push(h('div', { class: 'rd-tip-tn' }, 'TN · tramo neutro (planilla) en ' + km(p.km) + ': aislador entre fases distintas, posible golpe del pantógrafo'));
+      TNS.filter(function (p) { return k >= p.km - tolK && k <= p.b + tolK; }).forEach(function (p) {   // c49: toda la zona
+        hijos.push(h('div', { class: 'rd-tip-tn' }, 'Tramo neutro (planilla)' + (p.pd && p.ph && p.b > p.km ? ' ' + p.pd + ' a ' + p.ph : '') + ', ' + km(p.km) +
+          (p.b > p.km ? '–' + nf(p.b, 3) + ' (' + nf((p.b - p.km) * 1000, 0) + ' m)' : '') + ': aislador entre fases distintas, posible golpe del pantógrafo'));
+      });
+      TRS.filter(function (p) { return k >= p.km - tolK && k <= p.b + tolK; }).forEach(function (p) {   // c49
+        hijos.push(h('div', { class: 'rd-tip-sec' }, 'Transición de sección ' + p.de + ' → ' + p.al + ' mm² (planilla)' + (p.pd && p.ph ? ' ' + p.pd + ' a ' + p.ph : '') + ', ' +
+          km(p.km) + '–' + nf(p.b, 3) + ': cambia la sección del hilo; el equipo puede dar un aviso que no es desgaste'));
       });
       CSEC.filter(function (p) { return k >= (p.a != null ? p.a : p.km) - tolK && k <= (p.b != null ? p.b : p.km) + tolK; }).forEach(function (p) {
         hijos.push(h('div', { class: 'rd-tip-sec' }, 'Cambio de sección ' + p.de + ' → ' + p.al + ' mm²' + (p.piquetes ? ' (' + p.piquetes + ')' : '') +
@@ -2191,7 +2226,24 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
         if (p.a == null || p.b == null) return;
         s.push('<rect x="' + sx(p.a).toFixed(1) + '" y="' + mt + '" width="' + Math.max(2, sx(p.b) - sx(p.a)).toFixed(1) + '" height="' + hc + '" fill="#00897b" opacity=".13"/>');
       });
+      var chicas = [];   // c49: franjas angostas (vista lejana): en vez de marca de agua, una etiqueta arriba
+      function marcaAgua(p, color, texto, op, corto) {   // c49: franja + texto de marca de agua (vertical si la franja es angosta)
+        if (p.b <= a + 0.0005 || p.km >= b - 0.0005) return;   // menos de medio metro a la vista: no se dibuja (va el rótulo del borde)
+        var x1 = sx(Math.max(p.km, a)), x2 = sx(Math.min(p.b, b)), w = Math.max(4, x2 - x1), xm = x1 + (x2 - x1) / 2, ym = mt + hc / 2;
+        s.push('<rect x="' + (xm - w / 2).toFixed(1) + '" y="' + mt + '" width="' + w.toFixed(1) + '" height="' + hc + '" fill="' + color + '" opacity="' + op + '"/>');
+        if (w > 10) [x1, x2].forEach(function (xx) { s.push('<line x1="' + xx.toFixed(1) + '" x2="' + xx.toFixed(1) + '" y1="' + mt + '" y2="' + yAx + '" stroke="' + color + '" stroke-opacity=".55" stroke-dasharray="3 3"/>'); });
+        if (w < 16) { chicas.push({ x: xm, c: color, t: corto }); return; }
+        var fsH = Math.min(cel ? 18 : 24, (w - 14) / (texto.length * 0.72)), est = 'fill="' + color + '" fill-opacity=".38" font-weight="700" letter-spacing="1.5"';
+        if (fsH >= 11) T(xm, ym + fsH / 3, texto, 'text-anchor="middle" font-size="' + fsH.toFixed(1) + '" ' + est);
+        else {   // franja angosta: texto vertical, a lo alto del gráfico
+          var fsV = Math.min(cel ? 14 : 17, w + 2, (hc - 16) / (texto.length * 0.72));
+          s.push('<text x="' + xm.toFixed(1) + '" y="' + ym.toFixed(1) + '" transform="rotate(-90 ' + xm.toFixed(1) + ' ' + ym.toFixed(1) + ')" text-anchor="middle" dominant-baseline="central" font-size="' + fsV.toFixed(1) + '" ' +
+            est.replace('.38', '.5') + ' stroke="#fff" stroke-width="2.5" stroke-opacity=".6" paint-order="stroke">' + esc(texto) + '</text>');
+        }
+      }
       if (o.resaltar) s.push('<rect x="' + sx(o.resaltar[0]).toFixed(1) + '" y="' + mt + '" width="' + Math.max(1, sx(o.resaltar[1]) - sx(o.resaltar[0])).toFixed(1) + '" height="' + hc + '" fill="#a9d5ea" opacity=".45"/>');
+      TRS.forEach(function (p) { marcaAgua(p, '#00796b', 'TRANSICIÓN ' + p.de + ' → ' + p.al + ' mm²', '.14', p.de + '→' + p.al); });   // c49: arriba del vano resaltado
+      TNS.forEach(function (p) { marcaAgua(p, '#7b1fa2', 'TRAMO NEUTRO', '.2', 'TN'); });
       if (ids[0]) {   // relleno 15,49 (no medido) de la primera medición elegida
         var s0 = SER[ids[0]], p0 = s0.paso_km, j0 = Math.max(0, Math.ceil((a - s0.km0) / p0)), j1 = Math.min(s0.n - 1, Math.floor((b - s0.km0) / p0)), ini2 = null;
         for (var i = j0; i <= j1 + 1; i++) {
@@ -2262,12 +2314,27 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
         s.push('<rect x="' + xl.toFixed(1) + '" y="' + (mt + 16) + '" width="' + wl + '" height="13" rx="2" fill="#fff" opacity=".9"/>');
         T(xl + 3, mt + 26, lab, 'fill="#00695c" font-weight="500" font-size="10.5"');
       });
-      TNS.filter(function (p) { return p.km >= a && p.km <= b; }).forEach(function (p) {   // c38: tramo neutro
-        var x = sx(p.km);
-        s.push('<line x1="' + x.toFixed(1) + '" x2="' + x.toFixed(1) + '" y1="' + mt + '" y2="' + (yCan + hb) + '" stroke="#7b1fa2" stroke-width="1.6"/>');
-        var xl = Math.max(ml + 1, Math.min(W - mr - 21, x + 3));
-        s.push('<rect x="' + xl.toFixed(1) + '" y="' + (mt + 2) + '" width="20" height="13" rx="2" fill="#7b1fa2"/>');
-        T(xl + 10, mt + 12, 'TN', 'text-anchor="middle" fill="#fff" font-weight="700" font-size="10"');
+      var filas = [];   // c49: etiquetas de las franjas angostas, en filas para que no se pisen
+      chicas.sort(function (x, y) { return x.x - y.x; }).forEach(function (q) {
+        var wl = q.t.length * 6.2 + 8, xl = Math.max(ml + 1, Math.min(W - mr - wl - 1, q.x + 3)), f = 0;
+        while (filas[f] != null && filas[f] > xl - 3) f++;
+        filas[f] = xl + wl; var yy = mt + 2 + f * 16;
+        s.push('<rect x="' + xl.toFixed(1) + '" y="' + yy + '" width="' + wl.toFixed(1) + '" height="13" rx="2" fill="' + q.c + '" opacity=".85"/>');
+        T(xl + wl / 2, yy + 10, q.t, 'text-anchor="middle" fill="#fff" font-weight="700" font-size="10"');
+      });
+      // c49: TN o transición que queda justo fuera de la vía principal (antes del inicio o después del fin): rótulo en el borde
+      var yBorde = mt + 13 + filas.length * 16;
+      TRS.concat(TNS).forEach(function (p) {
+        var tn = TNS.indexOf(p) >= 0, c = tn ? '#7b1fa2' : '#00796b', lab;
+        var nom = tn ? (cel ? 'TN' : 'tramo neutro') : (cel ? p.de + '→' + p.al : 'transición ' + p.de + '→' + p.al + ' mm²');
+        if (p.b <= LP[0] + 0.0005 && a <= LP[0] + 0.0005) lab = '◂ ' + nom + ' hasta ' + km(p.b) + (cel ? '' : ', antes del inicio');
+        else if (p.km >= LP[1] - 0.0005 && b >= LP[1] - 0.0005) lab = nom + ' desde ' + km(p.km) + (cel ? '' : ', después del fin') + ' ▸';
+        else return;
+        var wl = lab.length * 6 + 8, izq = p.b <= LP[0] + 0.0005, xl = izq ? ml + 2 : W - mr - wl - 2;
+        s.push('<rect x="' + xl.toFixed(1) + '" y="' + (yBorde - 10) + '" width="' + wl.toFixed(1) + '" height="14" rx="2" fill="#fff" opacity=".9" stroke="' + c + '" stroke-opacity=".5"/>');
+        T(xl + 4, yBorde, lab, 'fill="' + c + '" font-size="10"');
+        s.push('<rect x="' + (izq ? ml : W - mr - 4) + '" y="' + mt + '" width="4" height="' + hc + '" fill="' + c + '" opacity=".35"/>');
+        yBorde += 16;
       });
       var fin2 = -1e9;
       est.filter(function (e) { return e.km >= a && e.km <= b; }).forEach(function (e) {
@@ -2297,7 +2364,8 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       h('span', null, h('i', { style: 'background:#7a4b00;height:4px' }), '⚑ dato a confirmar'),
       MINS.length ? h('span', null, h('b', { class: 'rd-tri' }, '▼'), 'mínimo del vano (da el estado; en normal, solo de cerca)') : null,
       CAL.length ? h('span', null, h('i', { class: 'rd-rombo' }), 'lectura de calibre (verificación en campo)') : null,
-      TNS.length ? h('span', null, h('i', { style: 'background:#7b1fa2;width:3px' }), 'TN tramo neutro: aislador entre fases distintas, posible golpe') : null,
+      TNS.length ? h('span', null, h('i', { style: 'background:rgba(123,31,162,.25)' }), 'tramo neutro (planilla): aislador entre fases distintas, posible golpe') : null,
+      TRS.length ? h('span', null, h('i', { style: 'background:rgba(0,121,107,.22)' }), 'transición de sección 170 → 110 mm² (planilla): el equipo puede dar un aviso que no es desgaste') : null,
       CSEC.length ? h('span', null, h('i', { style: 'background:#b2dfdb;border-left:2px dashed #00796b' }), 'cambio de sección del hilo (según los datos; «?» = a confirmar)') : null,
       h('span', null, h('i', { style: 'background:#c62828;height:4px' }), 'zona sin medición'),
       h('span', null, 'Tocá la franja de estado o un piquete para abrir el vano, y la de cantones para abrir el cantón.')));
@@ -2428,6 +2496,21 @@ function tramosDeHoja(nombre) {
   return (nombre.match(/\d+/g) || []).map(Number);
 }
 
+// c49: celdas combinadas de cada hoja, en coordenadas de la matriz de sheet_to_json(header:1). Se guardan en el libro sin
+// que cuenten como hoja: libro.__combinadas = { hoja: [{ f0, c0, f1, c1 }] }.
+function combinadas(wb, libro) {
+  var X = {};
+  Object.keys(libro).forEach(function (n) {
+    var ws = wb.Sheets[n]; if (!ws || !ws["!merges"] || !ws["!ref"]) return;
+    var r0 = /^([A-Z]+)(\d+)/.exec(ws["!ref"]), c0 = 0, f0 = +r0[2] - 1;
+    for (var i = 0; i < r0[1].length; i++) c0 = c0 * 26 + r0[1].charCodeAt(i) - 64;
+    c0 -= 1;
+    X[n] = ws["!merges"].map(function (m) { return { f0: m.s.r - f0, c0: m.s.c - c0, f1: m.e.r - f0, c1: m.e.c - c0 }; });
+  });
+  Object.defineProperty(libro, "__combinadas", { value: X, enumerable: false });
+  return libro;
+}
+
 function parsePiquetes(libro) {
   // libro: { nombreHoja: matriz }
   var out = { piquetes: [], vanos: [], cantones: [], marcas: [], errores: [], avisos: [] };
@@ -2502,6 +2585,15 @@ function parsePiquetes(libro) {
                      /^ps|secc/i.test(txt) ? "seccionamiento" : sec ? "seccion" : /sin identificar/i.test(txt) ? "postes_sin_identificar" : "otra";
           var marca = { hoja: nombre, via: vias[ix], fila: f2, ref: ref(nombre, f2, c2), texto: txt, tipo: tipo,
                         progresiva: esNum(km) ? km : null, piquete: typeof cod === "string" ? normCodigo(cod) : null };
+          // c49: extensión de la marca por la celda combinada de la planilla (TN y secciones «170 mm», «110 mm»)
+          var cmb = libro.__combinadas && libro.__combinadas[nombre];
+          if (cmb && (tipo === "zona_neutra" || sec)) {
+            var mg = cmb.filter(function (z) { return z.f0 === f2 && z.c0 === c2 && z.f1 > z.f0; })[0];
+            if (mg) for (var fz = mg.f1; fz >= f2; fz--) {
+              var cz = celda(h, fz, cols[ix]), kz = celda(h, fz, cols[ix] + 1);
+              if (typeof cz === "string" && RE_COD.test(cz.trim()) && esNum(kz)) { marca.progresiva_hasta = kz; marca.piquete_hasta = normCodigo(cz); break; }
+            }
+          }
           out.marcas.push(marca);
           if (tipo === "canton") cantonesHoja.push({ via: vias[ix], numero: +m[1], fila: f2, progresiva: marca.progresiva,
                                                     piquete: marca.piquete, seccion: sec ? +sec[1] : null, ref: marca.ref });
@@ -2822,7 +2914,7 @@ function elegirRecorrido(P, I) {
   return mejor;
 }
 
-if (typeof module !== "undefined") module.exports = { elegirRecorrido: elegirRecorrido, PERFIL: PERFIL, REGLAS: REGLAS, parsePiquetes: parsePiquetes, parseInforme: parseInforme,
+if (typeof module !== "undefined") module.exports = { combinadas: combinadas, elegirRecorrido: elegirRecorrido, PERFIL: PERFIL, REGLAS: REGLAS, parsePiquetes: parsePiquetes, parseInforme: parseInforme,
   procesarCampania: procesarCampania, normCodigo: normCodigo };
 
 
@@ -2907,7 +2999,12 @@ if (typeof module !== "undefined") module.exports = { elegirRecorrido: elegirRec
         return { clave: claveVano(v.hoja, v.via, v.desde, v.hasta), canton: v.canton_id, recorrido: v.hoja, via: v.via, tramo: v.tramo,
                  piquete_desde: v.desde, piquete_hasta: v.hasta, km_inicio: r5(v.km_inicio), km_fin: r5(v.km_fin), largo_m: v.largo_m, seccion: v.seccion };
       }),
-      marcas: P.marcas.map(function (m) { return { recorrido: m.hoja, via: m.via, km: r5(m.progresiva), tipo: m.tipo, texto: m.texto }; }),
+      marcas: (function () {   // c49: con la extensión de TN y secciones si la planilla se leyó con sus celdas combinadas (script 16)
+        var conHasta = P.marcas.some(function (m) { return m.progresiva_hasta != null; });
+        return P.marcas.map(function (m) { var o = { recorrido: m.hoja, via: m.via, km: r5(m.progresiva), tipo: m.tipo, texto: m.texto };
+          if (conHasta) { o.km_hasta = m.progresiva_hasta != null ? r5(m.progresiva_hasta) : null; o.piquete_desde = m.piquete || null; o.piquete_hasta = m.piquete_hasta || null; }
+          return o; });
+      })(),
       reporte: { errores: P.errores.slice(), avisos: P.avisos.slice() }
     };
     if (!plan.planilla.fecha) plan.errores.push('No se pudo leer la fecha de la planilla del nombre del archivo (' + planilla.nombre + ').');
@@ -5227,6 +5324,8 @@ if (typeof module !== "undefined") module.exports = { elegirRecorrido: elegirRec
       var d = anterior ? dif(e.valor_mm, anterior.valor_mm) : null;
       var subePromedio = anterior && e.prom_mm != null && anterior.prom_mm != null && +e.prom_mm - +anterior.prom_mm > T().SUBE_MM;
       var vida = e.vida_consumida != null ? Math.max(0, Math.min(100, +e.vida_consumida)) : null;
+      // c49: si el valor vigente viene de una pasada parcial, su aviso reemplaza a la nota genérica de «una sola lectura»
+      var pvParcial = e.fuente !== 'calibre' ? vig.filter(function (l) { return l.cobertura != null && +l.cobertura < 0.5 && +l.valor_mm === +e.valor_mm; })[0] : null;
       cuerpo = [
         h('div', { class: 'valor-vig' }, h('b', null, UI.mm(e.valor_mm)), ' ', UI.chipEstado(e.estado), e.revisar ? [' ', UI.chipFlag()] : null, tec && e.lectura_descartada ? [' ', h('span', { class: 'chip desc' }, 'lectura descartada')] : null),
         h('div', { class: 'nota' }, e.fuente === 'calibre' ? 'Verificado con calibre el ' : 'Medido el ', h('b', { class: 'nw' }, UI.fecha(e.fecha_dato)), ' (' + hace(e.antiguedad_dias) + ')', tec && e.km_min != null ? ' · mínimo en ' + UI.km(e.km_min) : '',
@@ -5236,11 +5335,10 @@ if (typeof module !== "undefined") module.exports = { elegirRecorrido: elegirRec
           '. La próxima medición del Geismar vuelve a mandar.' + (e.verificado_en_parte ? ' Se verificó solo una parte del vano y el Geismar no tiene medición válida del resto.' : '')) : null,   // c29
         tec && vig.length > 1 ? UI.mensaje('info', UI.plural(vig.length, 'medición', 'mediciones') + ' con dato el ' + UI.fecha(e.fecha_dato) + ' (' + vig.map(function (l) { return UI.mm(l.valor_mm); }).join(' y ') + '): el estado toma el mínimo.') : null,
         (function () {   // c47: el valor vigente viene de una pasada que leyó menos de la mitad del vano
-          var pv = e.fuente !== 'calibre' ? vig.filter(function (l) { return l.cobertura != null && +l.cobertura < 0.5 && +l.valor_mm === +e.valor_mm; })[0] : null;
-          return pv ? h('div', { class: 'rd-aviso', style: 'margin-top:8px' }, h('b', null, 'Medido solo en parte: '), 'el equipo leyó el ' + UI.num(+pv.cobertura * 100, 0) +
+          return pvParcial ? h('div', { class: 'rd-aviso', style: 'margin-top:8px' }, h('b', null, 'Medido solo en parte: '), 'el equipo leyó el ' + UI.num(+pvParcial.cobertura * 100, 0) +
             ' % del vano. Como lo leído da ' + ((UI.ESTADO[e.estado] || {}).t || e.estado).toLowerCase() + ', vale como dato a confirmar hasta que se revise o se verifique en campo.') : null;
         })(),
-        e.revisar ? h('p', { class: 'nota', style: 'margin:6px 0 0' }, 'Dato a confirmar: una sola lectura dio un valor bajo y todavía nadie confirmó si es real o un error del equipo. Vale como está hasta que un operador lo revise o se verifique en campo con calibre' + (tec ? ' (ver «Lecturas aisladas»).' : '.')) : null,
+        e.revisar && !pvParcial ? h('p', { class: 'nota', style: 'margin:6px 0 0' }, 'Dato a confirmar: una sola lectura dio un valor bajo y todavía nadie confirmó si es real o un error del equipo. Vale como está hasta que un operador lo revise o se verifique en campo con calibre' + (tec ? ' (ver «Lecturas aisladas»).' : '.')) : null,
         h('dl', { class: 'datos', style: 'margin-top:12px' },
           [h('dt', null, 'Medición anterior'), h('dd', null, anterior ? [UI.mm(anterior.valor_mm) + ' (' + UI.fecha(anterior.fecha) + ') · ', h('span', { class: claseDif(d) }, signo(d)),
             tec && subePromedio ? [' ', h('span', { class: 'chip flag', title: 'El promedio subió más de 1 mm: puede haber un reemplazo de hilo (§10.4)' }, 'promedio +1 mm: ¿reemplazo?')] : null]
@@ -7465,8 +7563,9 @@ if (typeof module !== "undefined") module.exports = { elegirRecorrido: elegirRec
         'PC: ruedita del mouse para acercar o alejar; arrastrá para moverte. Celular: dos dedos para el zoom, un dedo de costado para moverte.',
         'Las líneas punteadas son la alerta y el límite. La franja de abajo es el estado actual de cada vano.',
         'Tocá la franja o un piquete para abrir ese vano; la franja de cantones abre el cantón.',
-        'Línea violeta «TN»: tramo neutro de la planilla (aislador entre fases distintas). Ahí el pantógrafo puede dar un golpe: mirá si la curva cae justo en ese punto.',
-        'Línea verde azulada «170→110»: dónde cambia la sección del hilo según los datos. Con «?» todavía no está confirmado en campo; la altura de un hilo de 170 medido como 110 sale baja.',
+        'Franja violeta «TRAMO NEUTRO»: el tramo neutro completo según la planilla (aislador entre fases distintas). Ahí el pantógrafo puede dar un golpe: mirá si la curva cae dentro de la franja.',
+        'Franja verde azulada «TRANSICIÓN 170 → 110 mm²»: donde la planilla superpone la zona de 170 y la de 110 (arranque de los Tramos 7, 9 y 11). Ahí cambia la sección del hilo y el equipo, configurado en 110, puede dar un aviso que no es desgaste. Si la transición o el tramo neutro quedan justo antes del inicio de la vía principal, se avisa con un rótulo en el borde del gráfico.',
+        'Si la planilla no trae la transición, se ve como antes la línea punteada «170→110» que sale de los datos («?» = a confirmar en campo).',
         'El gráfico de un tramo muestra solo la vía principal, entre el primer y el último piquete del tramo.'],
         ir: null },
       { id: 'principal', para: 'todos', q: '¿Por qué no aparecen los cuadros de estación?', pasos: [
@@ -8452,6 +8551,7 @@ if (typeof module !== "undefined") module.exports = { elegirRecorrido: elegirRec
   function libro(buf, hojas) {
     var wb = global.XLSX.read(buf, { type: 'array', sheets: hojas, cellStyles: false, cellHTML: false, cellFormula: false });
     var l = {}; wb.SheetNames.forEach(function (x) { if (wb.Sheets[x]) l[x] = global.XLSX.utils.sheet_to_json(wb.Sheets[x], { header: 1, raw: true, defval: null }); });
+    if (typeof global.combinadas === 'function') global.combinadas(wb, l);   // c49: celdas combinadas (fin del TN y de las secciones)
     return l;
   }
   function kpi(t, v, cl, d) { return h('div', { class: 'kpi' + (cl ? ' ' + cl : '') }, h('small', null, t), h('b', null, v), d ? h('span', { class: 'kd' }, d) : null); }
