@@ -1796,7 +1796,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       Conexion.leerTodo('limite_tramo', { columnas: 'id, recorrido, via, tramo, piquete_desde, piquete_hasta, km_desde, km_hasta' })
         .then(function (x) { return x.error ? { datos: [], error: null, faltaLimites: true } : x; }),
       // c48: pedidos de verificación pendientes (script 18), para «en verificación desde dd-mm». Sin el 18 se sigue sin ellos.
-      Conexion.leerTodo('v_pedido_verificacion', { columnas: 'id, recorrido, via, km_desde, km_hasta, piquete_desde, piquete_hasta, pedido_en, pedido_nombre, nota', filtros: [['eq', 'estado', 'pendiente']] })
+      Conexion.leerTodo('v_pedido_verificacion', { columnas: 'id, recorrido, via, km_desde, km_hasta, piquete_desde, piquete_hasta, pedido_en, pedido_nombre, nota, n_vanos, n_faltan, faltan_ids', filtros: [['eq', 'estado', 'pendiente']] })
         .then(function (x) { return x.error ? { datos: [], error: null, faltaPedidos: true } : x; })
     ]);
     var err = rs.map(function (r) { return r.error; }).filter(Boolean)[0];
@@ -1854,10 +1854,11 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       var k = v.recorrido + '|' + v.via; (M.RV[k] = M.RV[k] || []).push(v);
     });
     Object.keys(M.RV).forEach(function (k) { M.RV[k].sort(function (a, b) { return a.ki - b.ki; }); M.RV[k].forEach(function (v, i) { v.i = i; }); });
-    // c48: cada vano con su pedido de verificación pendiente más viejo (v.ped). No cambia el estado.
+    // c48: cada vano TODAVÍA SIN MEDIR con su pedido de verificación pendiente más viejo (v.ped). No cambia el estado.
+    //      «Se cierra solo lo que se mide» (Sebastián, 26/10): un vano ya medido con calibre después del pedido no lleva v.ped.
     M.faltaPedidos = !!rs[8].faltaPedidos; M.PED = rs[8].datos.map(function (p) { return Object.assign({}, p, { a: +p.km_desde, b: +p.km_hasta }); })
       .sort(function (x, y) { return String(x.pedido_en).localeCompare(String(y.pedido_en)); });
-    M.PED.forEach(function (p) { (M.RV[p.recorrido + '|' + p.via] || []).forEach(function (v) { if (!v.ped && v.ki < p.b - 0.0005 && v.kf > p.a + 0.0005) v.ped = p; }); });
+    M.PED.forEach(function (p) { (M.RV[p.recorrido + '|' + p.via] || []).forEach(function (v) { if (!v.ped && v.ki < p.b - 0.0005 && v.kf > p.a + 0.0005 && (!p.faltan_ids || p.faltan_ids.indexOf(v.vano_id) >= 0)) v.ped = p; }); });
     return { error: null, M: M };
   }
 
@@ -7937,7 +7938,7 @@ if (typeof module !== "undefined") module.exports = { combinadas: combinadas, el
         'Entrá a la ficha del vano (o a la pantalla del cantón) y tocá «Pedir verificación».',
         'Elegí el sector (desde el piquete, hasta el piquete) y, si querés, escribí qué mirar. Tocá «Pedir la verificación».',
         'No cambia el estado del vano ni manda mails: en la ficha y en los listados el vano queda «en verificación desde» la fecha, y los operadores lo ven con un número junto a «En campo».',
-        'Se cierra solo cuando el operador carga la verificación con calibre de ese sector. Si no hizo falta medir, el operador lo cierra con el motivo.',
+        'Se cierra solo lo que se mide: cada vano con lecturas de calibre deja de figurar «en verificación», y el pedido se cierra cuando están medidos todos los vanos del sector. Si no hizo falta medir el resto, el operador lo cierra con el motivo.',
         'Si lo pediste por error, abrilo en «En campo» → Pedidos de verificación y tocá «Cancelar el pedido» con el motivo.'],
         ir: ['#/campo', 'Ir a En campo'] },
       { id: 'calibre', para: 'informa', q: '¿Cómo cargo una verificación con calibre?', pasos: [
@@ -7951,9 +7952,9 @@ if (typeof module !== "undefined") module.exports = { combinadas: combinadas, el
       { id: 'pedidoop', para: 'informa', q: '¿Qué hago con un pedido de verificación?', pasos: [   // c48
         'El número junto a «En campo» (en el celular, en «Más») suma los pedidos de verificación pendientes.',
         'En «En campo» → Pedidos de verificación, tocá el pedido: dice quién lo pidió, el sector y qué mirar.',
-        'Cuando llegue la planilla de la guardia, tocá «Cargar la verificación» y cargala como siempre: al guardarla, el pedido se cierra solo.',
-        'Si no hizo falta medir (ya estaba verificado, se intervino el hilo, etc.), abrí «Cerrar sin cargar la verificación» y escribí el motivo.',
-        'Si se anula la verificación que cerró un pedido, el pedido vuelve a quedar pendiente.'],
+        'Cuando llegue la planilla de la guardia, tocá «Cargar la verificación» y cargala como siempre. Cada vano con lecturas queda medido; cuando están todos los vanos del sector, el pedido se cierra solo.',
+        'Si se midió solo una parte, el pedido dice «medidos N de M vanos» y cuáles faltan. Si el resto no hace falta (por ejemplo, se midió solo el vano sospechoso), abrí «Cerrar sin cargar la verificación» y escribí el motivo.',
+        'Si se anula una verificación y faltan vanos otra vez, el pedido vuelve a quedar pendiente.'],
         ir: ['#/campo', 'Ir a En campo'] },
       { id: 'resultado', para: 'informa', q: '¿Cómo cambia el estado del vano con el calibre?', pasos: [
         'El vano queda con el valor más bajo entre las lecturas del calibre y lo que midió el Geismar fuera del sector verificado.',
@@ -8799,8 +8800,10 @@ if (typeof module !== "undefined") module.exports = { combinadas: combinadas, el
   // ------------------------------------------------------------------
   var CIERRE_N = { calibre: 'se cargó la verificación', operador: 'cerrado sin cargar', cancelado: 'cancelado' };
   function quienPidio(x) { return (x.pedido_nombre || '—') + (x.pedido_cargo ? ' (' + (CARGO_N[x.pedido_cargo] || x.pedido_cargo) + (x.pedido_base ? ', base ' + x.pedido_base : '') + ')' : ''); }
+  function parcial(x) { return x.estado === 'pendiente' && x.n_faltan != null && +x.n_faltan < +x.n_vanos; }
   function estPedido(x) {
-    return x.estado === 'pendiente' ? h('span', { class: 'chip ped' }, 'en verificación desde ' + UI.diaMes(x.pedido_en))
+    return x.estado === 'pendiente' ? [h('span', { class: 'chip ped' }, 'en verificación desde ' + UI.diaMes(x.pedido_en)),
+        parcial(x) ? h('div', { class: 'rd-peq' }, 'medidos ' + (x.n_vanos - x.n_faltan) + ' de ' + x.n_vanos + ' vanos') : null]
       : h('span', { class: x.estado === 'cancelado' ? 'chip desc' : 'chip vig' }, (CIERRE_N[x.cierre] || x.estado) + ' ' + UI.diaMes(x.cerrado_en));
   }
   function tarjetaPedidos(ctx, todos, verTodos) {
@@ -8858,14 +8861,16 @@ if (typeof module !== "undefined") module.exports = { combinadas: combinadas, el
 
   // Ruta para cargar la verificación de un pedido: el vano, o el cantón si el pedido es el cantón entero
   function rutaVerificarPedido(M, x) {
-    var vs = (M.RV[x.recorrido + '|' + x.via] || []).filter(function (v) { return v.ki < +x.km_hasta - 0.0005 && v.kf > +x.km_desde + 0.0005; });
+    var todos = (M.RV[x.recorrido + '|' + x.via] || []).filter(function (v) { return v.ki < +x.km_hasta - 0.0005 && v.kf > +x.km_desde + 0.0005; });
+    var vs = x.faltan_ids ? todos.filter(function (v) { return x.faltan_ids.indexOf(v.vano_id) >= 0; }) : todos;   // lo que falta medir
+    if (!vs.length) vs = todos;
     if (!vs.length) return null;
     var v = vs[0], ruta = Rutas.hacia('vano', UI.viaARuta(v.via), v.piquete_desde) + '/verificar' + (Number(String(v.piquete_desde).split('-')[0]) !== Number(v.tramo) ? '?hasta=' + encodeURIComponent(v.piquete_hasta) : '');
     if (vs.length > 1 && v.cnum != null && vs.every(function (y) { return y.cnum === v.cnum && y.tramo === v.tramo; })) {
       var rc = Mo.rutaCantonDeVano(M, v), i = rc.indexOf('?');
       ruta = i < 0 ? rc + '/verificar' : rc.slice(0, i) + '/verificar' + rc.slice(i);
     }
-    return { ruta: ruta, vanos: vs };
+    return { ruta: ruta, vanos: todos };
   }
 
   async function pDetPed(ctx) {
@@ -8897,7 +8902,9 @@ if (typeof module !== "undefined") module.exports = { combinadas: combinadas, el
       h('div', { class: 'rd-cab' }, h('div', null, h('h1', null, 'Pedido de verificación N° ' + x.id), h('p', { class: 'sub' }, 'Tramo ' + (x.tramo || '?') + ' · ' + UI.nombreVia(x.via) + ' · pedido el ' + UI.fecha(x.pedido_en))),
         h('div', { class: 'acciones rd-acc' }, h('a', { class: 'btn sec chico', href: '#/campo' }, '← En campo'),
           pend && op && V ? h('a', { class: 'btn chico', href: V.ruta }, 'Cargar la verificación') : null)),
-      pend ? h('div', { class: 'rd-aviso' }, h('b', null, 'En verificación desde el ' + UI.fecha(x.pedido_en) + '. '), 'No cambia el estado de los vanos.' + (op ? ' Al guardar una verificación con calibre que toque este sector, el pedido se cierra solo.' : ''))
+      pend ? h('div', { class: 'rd-aviso' }, h('b', null, 'En verificación desde el ' + UI.fecha(x.pedido_en) + '. '),
+          parcial(x) ? ['Verificado en parte: ', h('b', null, 'medidos ' + (x.n_vanos - x.n_faltan) + ' de ' + x.n_vanos + ' vanos'), ' (' + (x.medidas || '') + '). Faltan: ', h('span', { class: 'mono' }, (x.faltan || []).join(', ')), '. '] : null,
+          'No cambia el estado de los vanos.' + (op ? ' Se cierra solo cuando todos los vanos del sector tienen lecturas de calibre cargadas después del pedido; si no hace falta medir el resto, cerralo con el motivo.' : ''))
         : UI.mensaje('info', x.estado === 'cancelado' ? 'Cancelado por ' + (x.cerrado_nombre || '—') + ' el ' + UI.fecha(x.cerrado_en) + ': «' + (x.motivo_cierre || '') + '».'
           : x.cierre === 'calibre' ? ['Cerrado el ' + UI.fecha(x.cerrado_en) + ': ', h('a', { href: '#/campo/verificacion/' + x.verificacion_id }, x.motivo_cierre || 'verificación N° ' + x.verificacion_id), x.cerrado_nombre ? ' (cargó ' + x.cerrado_nombre + ').' : '.']
           : 'Cerrado sin cargar la verificación por ' + (x.cerrado_nombre || '—') + ' el ' + UI.fecha(x.cerrado_en) + ': «' + (x.motivo_cierre || '') + '».'),
@@ -8908,7 +8915,9 @@ if (typeof module !== "undefined") module.exports = { combinadas: combinadas, el
         x.base ? [h('dt', null, 'Base del sector'), h('dd', null, x.base)] : null,
         h('dt', null, 'Qué mirar'), h('dd', { style: 'white-space:pre-wrap' }, x.nota || '—'))),
       vs.length ? UI.card('Vanos del sector', UI.plural(vs.length, 'vano'), h('ul', { class: 'lista-vanos' }, vs.map(function (v) {
-        return h('li', null, h('a', { href: T().rutaVano(v) }, h('span', { class: 'lv-n' }, v.piquete_desde + ' → ' + v.piquete_hasta), ' ', UI.chipEstado(v.estado), v.val != null ? h('span', { class: 'nota' }, ' · ' + UI.mm(v.val)) : null));
+        var medido = pend && x.faltan_ids && x.faltan_ids.indexOf(v.vano_id) < 0;
+        return h('li', null, h('a', { href: T().rutaVano(v) }, h('span', { class: 'lv-n' }, v.piquete_desde + ' → ' + v.piquete_hasta), ' ', UI.chipEstado(v.estado), v.val != null ? h('span', { class: 'nota' }, ' · ' + UI.mm(v.val)) : null,
+          pend ? (medido ? h('span', { class: 'chip vig' }, ' medido con calibre') : h('span', { class: 'chip ped' }, 'falta medir')) : null));
       }))) : null,
       pend && op ? accion('Cerrar sin cargar la verificación', 'Para cuando no hizo falta medir (por ejemplo, ya se había verificado o el sector se intervino). Queda tu nombre, la fecha y el motivo.', 'cerrar_pedido_verificacion', 10, 'Ej.: se miró en la ronda del 26-10 y el hilo está bien; no hizo falta medir.', 'Cerrar el pedido') : null,
       puedeCancelar ? accion('Cancelar el pedido', 'Si se pidió por error o ya no hace falta. Queda tu nombre, la fecha y el motivo.', 'cancelar_pedido_verificacion', 5, 'Ej.: lo pedí en la vía equivocada.', 'Cancelar el pedido') : null);
@@ -8919,6 +8928,8 @@ if (typeof module !== "undefined") module.exports = { combinadas: combinadas, el
     var r = await Conexion.leer('v_pedido_verificacion', { filtros: [['eq', 'estado', 'pendiente'], ['eq', 'recorrido', v.recorrido], ['eq', 'via', v.via], ['lt', 'km_desde', v.km_fin], ['gt', 'km_hasta', v.km_inicio]], orden: ['pedido_en'] });
     if (r.error || !r.datos.length) return null;
     var x = r.datos[0];
+    if (x.faltan_ids && x.faltan_ids.indexOf(v.id) < 0)   // este vano ya se midió: el pedido sigue por los otros
+      return h('div', { class: 'msg info', role: 'status' }, 'Este vano ya se midió con calibre para el pedido del ' + UI.fecha(x.pedido_en) + ' (' + x.piquete_desde + ' → ' + x.piquete_hasta + '). Faltan ' + UI.plural(+x.n_faltan, 'vano') + ' del sector. ', h('a', { href: '#/campo/pedido/' + x.id }, 'Ver el pedido'));
     return h('div', { class: 'rd-aviso ped', role: 'status' }, h('b', null, 'En verificación desde el ' + UI.fecha(x.pedido_en) + '. '),
       'Lo pidió ' + quienPidio(x) + (x.nota ? ': «' + x.nota + '»' : '') + '. No cambia el estado. ', h('a', { href: '#/campo/pedido/' + x.id }, Conexion.puede(ctx.sesion, 'informar') ? 'Ver el pedido y cargar la verificación' : 'Ver el pedido'));
   }
