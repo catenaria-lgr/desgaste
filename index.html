@@ -5,6 +5,21 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="robots" content="noindex, nofollow">
 <meta name="theme-color" content="#ffffff">
+<!-- c54 · Instalable (PWA): manifest, íconos y service worker van como archivos sueltos al lado de index.html -->
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icono.svg" type="image/svg+xml">
+<link rel="icon" href="icono-192.png" type="image/png" sizes="192x192">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Desgaste LR">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<script>
+// c54 · Registra el service worker (no guarda datos: solo habilita «Instalar»).
+if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost')) {
+  window.addEventListener('load', function () { navigator.serviceWorker.register('sw.js').catch(function () {}); });
+}
+</script>
 <!-- c43 · Versión en un solo archivo de index.html. El original va en carpetas: ver claude/app/ -->
 <title>Desgaste de catenaria · Línea Roca</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
