@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="robots" content="noindex, nofollow">
 <meta name="theme-color" content="#ffffff">
-<!-- c55 · Versión al pie y aviso de versión nueva (js/version.js + version.json) -->
+<!-- c56 · Versión V1.001 en Mi cuenta y aviso de versión nueva (js/version.js + version.json) -->
 <!-- c54 · Instalable (PWA): manifest, íconos y service worker van como archivos sueltos al lado de index.html -->
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" href="icono.svg" type="image/svg+xml">
@@ -672,7 +672,6 @@ ul.au-lista { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; 
   <nav class="miga" id="miga" aria-label="Dónde estás" hidden></nav>
   <div id="vista"><div class="cargando">Cargando…</div></div>
 </main>
-<footer class="pie-version" id="pie-version"></footer>
 
 <nav class="nav-cel" id="nav-cel" aria-label="Principal"></nav>
 <div class="hoja" id="hoja-mas" hidden>
@@ -4037,7 +4036,7 @@ if (typeof module !== "undefined") module.exports = { combinadas: combinadas, el
     } }, 'Salir');
 
     el.replaceChildren.apply(el, [
-      UI.encabezado('Mi cuenta'),
+      UI.encabezado('Mi cuenta', window.APP_VERSION ? 'Versión de la app: ' + window.APP_VERSION.id + ' · ' + window.APP_VERSION.fecha + '. Si avisás un problema, decí esta versión.' : null),
       nueva ? UI.mensaje('info', 'Entraste con el link del mail. Definí tu contraseña nueva para terminar.') : null,
       provisoria ? UI.mensaje('info', 'Tu contraseña es provisoria (te la dio un administrador). Definí una nueva para seguir: mínimo 8 caracteres, con letras y números.') : null,
       h('div', { class: 'grilla' },
@@ -8113,6 +8112,7 @@ if (typeof module !== "undefined") module.exports = { combinadas: combinadas, el
     return 'Qué pasó o qué propongo:\n\n\n' +
       '— Datos para ubicar la sugerencia (no borrar) —\n' +
       'Usuario: ' + (s.nombre || s.mail || '') + (s.rol ? ' (' + s.rol + (s.cargo ? ', ' + s.cargo : '') + ')' : '') + '\n' +
+      'Versión de la app: ' + (global.APP_VERSION ? global.APP_VERSION.id : '?') + '\n' +
       'Pantalla: ' + base + (ultimaPantalla || '#/') + '\n' +
       'Navegador: ' + navigator.userAgent.slice(0, 120);
   }
@@ -10026,8 +10026,10 @@ if (typeof module !== "undefined") module.exports = { combinadas: combinadas, el
 </script>
 <script>/* js/version.js */
 /* =====================================================================
- * version.js — c55 · Versión de la app y aviso de versión nueva
- * - Muestra «Versión cNN · fecha» al pie de todas las pantallas.
+ * version.js — c55/c56 · Versión de la app y aviso de versión nueva
+ * - Versión V1.001, V1.002… (c56, Sebastián 29/10/2026): sube 0,001 con
+ *   cada actualización publicada. Se ve en Mi cuenta (debajo del título)
+ *   y va en el mail de «Mandar una sugerencia».
  * - Consulta version.json (al lado de index.html, pedido siempre al
  *   servidor) al abrir, al volver a la ventana y cada 30 min. Si lo
  *   publicado es MÁS NUEVO que lo que está corriendo, muestra una franja
@@ -10038,7 +10040,7 @@ if (typeof module !== "undefined") module.exports = { combinadas: combinadas, el
  * ===================================================================== */
 (function (global) {
   'use strict';
-  var VERSION = { id: 'c55', fecha: '29/10/2026', publicado: '2026-10-29T19:30' };
+  var VERSION = { id: 'V1.001', tarea: 'c56', fecha: '29/10/2026', publicado: '2026-10-29T20:30' };
   global.APP_VERSION = VERSION;
 
   var CADA_MS = 30 * 60 * 1000;
@@ -10047,11 +10049,6 @@ if (typeof module !== "undefined") module.exports = { combinadas: combinadas, el
 
   function leer(k) { try { return global.sessionStorage.getItem(k); } catch (e) { return null; } }
   function guardar(k, v) { try { if (v == null) global.sessionStorage.removeItem(k); else global.sessionStorage.setItem(k, v); } catch (e) {} }
-
-  function pie() {
-    var p = document.getElementById('pie-version');
-    if (p) p.textContent = 'Versión ' + VERSION.id + ' · ' + VERSION.fecha;
-  }
 
   function avisar(nueva) {
     var a = document.getElementById('aviso-version');
@@ -10089,7 +10086,6 @@ if (typeof module !== "undefined") module.exports = { combinadas: combinadas, el
   }
 
   function iniciar() {
-    pie();
     setTimeout(function () { revisar(true); }, 3000);
     setInterval(function () { revisar(false); }, CADA_MS);
     document.addEventListener('visibilitychange', function () { if (document.visibilityState === 'visible') revisar(false); });
