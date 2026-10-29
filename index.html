@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="robots" content="noindex, nofollow">
 <meta name="theme-color" content="#ffffff">
+<!-- c55 · Versión al pie y aviso de versión nueva (js/version.js + version.json) -->
 <!-- c54 · Instalable (PWA): manifest, íconos y service worker van como archivos sueltos al lado de index.html -->
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" href="icono.svg" type="image/svg+xml">
@@ -101,6 +102,11 @@ code, .mono { font-family: var(--mono); font-size: 0.86em; }
 .miga a:hover { color: var(--azul); text-decoration: underline; }
 .miga [aria-current] { color: var(--fg); font-weight: 400; }
 .aviso-red { background: #fdecea; color: #7a1c1c; font-size: 14px; padding: 8px 16px; text-align: center; }
+/* c55 · Aviso de versión nueva y versión al pie */
+.aviso-version { background: var(--celeste); color: var(--celeste-ink); font-size: 14px; padding: 8px 16px; text-align: center; }
+.aviso-version button { margin-left: 8px; font: inherit; font-weight: 500; background: var(--negro); color: #fff; border: 0; border-radius: 999px; padding: 4px 14px; cursor: pointer; }
+.pie-version { max-width: 1800px; margin: 0 auto; padding: 8px 24px 24px; color: var(--muted); font-size: 12px; text-align: right; }
+@media (max-width: 760px) { .pie-version { padding: 8px 16px calc(var(--alto-inf) + 16px + env(safe-area-inset-bottom, 0px)); } }
 
 .vista { display: grid; gap: 16px; }
 .vista > * { min-width: 0; }
@@ -525,7 +531,7 @@ table.rd-t { border-collapse: collapse; width: 100%; font-size: 13.5px; font-var
 /* impresión del informe: solo la hoja */
 @media print {
   body { background: #fff; }
-  .barra-sup, .nav-cel, .miga, .aviso-red, .toast, .rd-noimp, .saltar, .rd-zbar, .rd-meds .rd-peq { display: none !important; }
+  .barra-sup, .nav-cel, .miga, .aviso-red, .aviso-version, .pie-version, .toast, .rd-noimp, .saltar, .rd-zbar, .rd-meds .rd-peq { display: none !important; }
   .contenido { padding: 0; max-width: none; }
   .rd-hoja { box-shadow: none; padding: 0; max-width: none; }
   .rd-medbtn[aria-pressed="false"] { display: none; }
@@ -660,11 +666,13 @@ ul.au-lista { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; 
 </header>
 
 <div class="aviso-red" id="aviso-red" role="status" hidden></div>
+<div class="aviso-version" id="aviso-version" role="status" aria-live="polite" hidden></div>
 
 <main id="contenido" class="contenido" tabindex="-1">
   <nav class="miga" id="miga" aria-label="Dónde estás" hidden></nav>
   <div id="vista"><div class="cargando">Cargando…</div></div>
 </main>
+<footer class="pie-version" id="pie-version"></footer>
 
 <nav class="nav-cel" id="nav-cel" aria-label="Principal"></nav>
 <div class="hoja" id="hoja-mas" hidden>
@@ -10015,6 +10023,82 @@ if (typeof module !== "undefined") module.exports = { combinadas: combinadas, el
   Rutas.definir('/admin/auditoria', { pantalla: auditoria, titulo: 'Auditoría', pestana: 'admin', requiere: 'admin' });
   window.PantallaAdministracion = { describir: describir, cambios: cambios };   // para las pruebas
 })();
+</script>
+<script>/* js/version.js */
+/* =====================================================================
+ * version.js — c55 · Versión de la app y aviso de versión nueva
+ * - Muestra «Versión cNN · fecha» al pie de todas las pantallas.
+ * - Consulta version.json (al lado de index.html, pedido siempre al
+ *   servidor) al abrir, al volver a la ventana y cada 30 min. Si lo
+ *   publicado es MÁS NUEVO que lo que está corriendo, muestra una franja
+ *   con «Actualizar». Nunca recarga sola (no se pierde una carga a medias).
+ * - Si version.json no está o no hay red, no muestra nada.
+ * Al publicar: subir index.html y version.json JUNTOS, con el mismo id y
+ * el mismo «publicado».
+ * ===================================================================== */
+(function (global) {
+  'use strict';
+  var VERSION = { id: 'c55', fecha: '29/10/2026', publicado: '2026-10-29T19:30' };
+  global.APP_VERSION = VERSION;
+
+  var CADA_MS = 30 * 60 * 1000;
+  var CLAVE = 'desgaste-version-pedida';
+  var ultima = 0;
+
+  function leer(k) { try { return global.sessionStorage.getItem(k); } catch (e) { return null; } }
+  function guardar(k, v) { try { if (v == null) global.sessionStorage.removeItem(k); else global.sessionStorage.setItem(k, v); } catch (e) {} }
+
+  function pie() {
+    var p = document.getElementById('pie-version');
+    if (p) p.textContent = 'Versión ' + VERSION.id + ' · ' + VERSION.fecha;
+  }
+
+  function avisar(nueva) {
+    var a = document.getElementById('aviso-version');
+    if (!a) return;
+    a.textContent = '';
+    var t = document.createElement('span');
+    t.textContent = 'Hay una versión nueva de la app (' + String(nueva.id) + (nueva.fecha ? ' · ' + String(nueva.fecha) : '') + '). ';
+    var b = document.createElement('button');
+    b.type = 'button';
+    b.textContent = 'Actualizar';
+    b.onclick = function () { guardar(CLAVE, String(nueva.publicado)); global.location.reload(); };
+    a.appendChild(t);
+    a.appendChild(b);
+    a.hidden = false;
+  }
+
+  function revisar(alAbrir) {
+    if (!/^https?:$/.test(global.location.protocol) || !global.fetch) return;
+    var ahora = Date.now();
+    if (!alAbrir && ahora - ultima < 60 * 1000) return;   // a lo sumo una consulta por minuto
+    ultima = ahora;
+    global.fetch('version.json?t=' + ahora, { cache: 'no-store' })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (v) {
+        if (!v || typeof v.publicado !== 'string' || !(v.publicado > VERSION.publicado)) {
+          if (alAbrir) guardar(CLAVE, null);
+          return;
+        }
+        // Se tocó «Actualizar» y el servidor todavía entregó la anterior (caché de unos minutos):
+        // no se insiste al abrir; la próxima consulta (volver a la ventana o 30 min) vuelve a avisar.
+        if (alAbrir && leer(CLAVE) === v.publicado) { guardar(CLAVE, null); return; }
+        avisar(v);
+      })
+      .catch(function () { /* sin red o sin archivo: no se avisa nada */ });
+  }
+
+  function iniciar() {
+    pie();
+    setTimeout(function () { revisar(true); }, 3000);
+    setInterval(function () { revisar(false); }, CADA_MS);
+    document.addEventListener('visibilitychange', function () { if (document.visibilityState === 'visible') revisar(false); });
+    global.addEventListener('focus', function () { revisar(false); });
+  }
+
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', iniciar);
+  else iniciar();
+})(window);
 </script>
 <script>/* js/app.js */
 /* =====================================================================
