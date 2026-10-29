@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="robots" content="noindex, nofollow">
 <meta name="theme-color" content="#ffffff">
-<!-- c56 · Versión V1.001 en Mi cuenta y aviso de versión nueva (js/version.js + version.json) -->
+<!-- c56–c57 · Versión (V1.002) en Mi cuenta y aviso de versión nueva (js/version.js + version.json) -->
 <!-- c54 · Instalable (PWA): manifest, íconos y service worker van como archivos sueltos al lado de index.html -->
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" href="icono.svg" type="image/svg+xml">
@@ -4440,12 +4440,7 @@ if (typeof module !== "undefined") module.exports = { combinadas: combinadas, el
     // s42 (15/10 23:21, Sebastián): sin fila de título ni tarjetas; el cuadro se llama «Red de la Línea Roca» y lleva los km; el esquema gana el alto
     var b = [avisoParciales(M)];
     var esq = esquemaRed(M, 'Red de la Línea Roca', UI.num(r.largo / 1000, 1) + ' km de vías electrificadas'); esq.classList.add('rd-esq-card', 'rd-esq-principal'); b.push(esq);
-    if (ctx.tec) {   // medición de velocidad (s41): solo operadores y administradores
-      var ti = M.tiempos || {};
-      b.push(h('p', { class: 'nota rd-tiempos' }, 'Lectura de la red: ' + (ti.total != null ? UI.num(ti.total / 1000, 1) + ' s' : '—') +
-        (ti.estado != null ? ' (estado de los vanos ' + UI.num(ti.estado / 1000, 1) + ' s, ' + (ti.via === 'estado_red' ? 'un pedido' : 'en páginas: falta el script 04') + ')' : '') +
-        (ti.parciales != null ? ' · lecturas parciales ' + UI.num(ti.parciales / 1000, 1) + ' s' : '') + '.'));
-    }
+    // c57 (29/10/2026, Sebastián): se sacó la línea «Lectura de la red: X s» que veían operadores y administradores; el esquema gana ese alto.
     var red = h('div', { class: 'rd-red' }, b.filter(Boolean));
     ctx.el.replaceChildren(red);
     ajustarAlto(red);
@@ -10040,7 +10035,7 @@ if (typeof module !== "undefined") module.exports = { combinadas: combinadas, el
  * ===================================================================== */
 (function (global) {
   'use strict';
-  var VERSION = { id: 'V1.001', tarea: 'c56', fecha: '29/10/2026', publicado: '2026-10-29T20:30' };
+  var VERSION = { id: 'V1.002', tarea: 'c57', fecha: '29/10/2026', publicado: '2026-10-29T21:00' };
   global.APP_VERSION = VERSION;
 
   var CADA_MS = 30 * 60 * 1000;
