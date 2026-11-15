@@ -642,6 +642,18 @@ ul.au-lista { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; 
 .au-det { margin-top: 8px; padding-top: 8px; border-top: 1px dashed var(--line); }
 .au-det dl.datos { font-size: 13px; }
 .au-det .tabla td { overflow-wrap: anywhere; }
+.rd-quehago h2 { font-size: 16px; font-weight: 500; margin: 0 0 8px; }
+.rd-quehago ol { margin: 0 0 10px; padding-left: 20px; font-size: 14px; }
+.rd-quehago li { margin-bottom: 4px; }
+.rd-quehago li b { font-weight: 500; }
+.rd-accfila { margin-top: 3px; }
+.cf-puntos td input.cf-cal { width: 72px; text-align: right; }
+.cf-tilde { display: flex; gap: 6px; align-items: center; }
+.cf-tilde input { width: 20px; height: 20px; }
+.cf-queda { margin-top: 8px; font-size: 14px; }
+.cf-pos { white-space: normal; text-align: right; }
+.cf-pos .rd-peq { display: block; }
+@media (min-width: 700px) { .cf-pos { text-align: left; } }
 </style>
 <script>
   /* Antes de que supabase-js lea y limpie la dirección: ¿venimos del link de
@@ -888,7 +900,8 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       consultar: true,
       usuario: !!rol,                                           // cualquier usuario con perfil activo (c31)
       informar: rol === 'admin' || rol === 'operador',          // c40 (orden de la Coordinación, 23/10/2026): Análisis y gestión solo consulta
-      pedir: rol === 'admin' || (rol === 'gestion' && (s.cargo === 'jefe_base' || s.cargo === 'coordinacion')),   // c48: única escritura de Análisis y gestión (script 18)
+      pedir: rol === 'admin' || rol === 'gestion',                // c48, c59: pide verificación todo Análisis y gestión, con cualquier cargo (script 19)
+      descartar: rol === 'admin' || rol === 'operador' || rol === 'gestion',   // c59: pedir descartar una alarma; lo valida un operador o administrador
       cargar: rol === 'operador' || rol === 'admin',
       clasificar: rol === 'operador' || rol === 'admin',
       anular: rol === 'operador' || rol === 'admin',
@@ -1136,6 +1149,13 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
     var p = v && v.ped; if (!p) return null;
     return h('span', { class: 'chip ped', title: 'Mandado a verificar en campo' + (p.pedido_nombre ? ' por ' + p.pedido_nombre : '') + ' el ' + fecha(p.pedido_en) + (p.nota ? ': ' + p.nota : '') + '. No cambia el estado del vano.' }, 'en verificación desde ' + diaMes(p.pedido_en));
   }
+  // c59: descarte de una alarma: pedido (v.pedDesc, la alarma sigue) y aceptado (v.desc)
+  function chipsDescarte(v) {
+    var o = [];
+    if (v && v.pedDesc) o.push(h('span', { class: 'chip ped', title: 'Pidió descartar la alarma ' + (v.pedDesc.pedido_nombre || '') + ': ' + (v.pedDesc.nota || '') + '. La alarma sigue hasta que un operador o administrador lo valide.' }, 'descarte pedido'));
+    if (v && v.desc) o.push(h('span', { class: 'chip desc', title: 'Alarma de ' + num(v.desc.valor_antes, 2) + ' mm del ' + fecha(v.desc.fecha) + ' descartada: ' + (v.desc.nota || '') }, 'alarma descartada'));
+    return o;
+  }
   function hoyISO() { var d = new Date(); return d.getFullYear() + '-' + ('0' + (d.getMonth() + 1)).slice(-2) + '-' + ('0' + d.getDate()).slice(-2); }
   function plural(n, uno, varios) { return n + ' ' + (n === 1 ? uno : (varios || uno + 's')); }
 
@@ -1189,7 +1209,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
     h: h, toast: toast, card: card, encabezado: encabezado, pendiente: pendiente, mensaje: mensaje, fecha: fecha, hoyISO: hoyISO,
     viasDelTramo: viasDelTramo, viaDesdeRuta: viaDesdeRuta, viaARuta: viaARuta, nombreVia: nombreVia, viaValida: viaValida,
     RX_PIQUETE: RX_PIQUETE, ESTADO_TRAMO: ESTADO_TRAMO,
-    ESTADO: ESTADO, chipEstado: chipEstado, chipFlag: chipFlag, chipPedido: chipPedido, diaMes: diaMes, num: num, mm: mm, km: km, plural: plural, cargarScript: cargarScript
+    ESTADO: ESTADO, chipEstado: chipEstado, chipFlag: chipFlag, chipPedido: chipPedido, chipsDescarte: chipsDescarte, diaMes: diaMes, num: num, mm: mm, km: km, plural: plural, cargarScript: cargarScript
   };
 })(window);
 
@@ -1334,7 +1354,82 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
 
 
 </script>
-<script>/* js/curva.js */
+<script>/* js/descarte.js */
+/* =====================================================================
+ * descarte.js — Puntos bajos de un vano y mínimo fuera de los puntos tildados (c59, revisión 15/11/2026)
+ * Se calcula desde la serie de 0,5 m (serie.js). Lo usan la validación del descarte y las pruebas.
+ *
+ *   Descarte.puntosBajos(s, a, b, alerta, excl, anomalias)  → [{ km_desde, km_hasta, min_mm, km_min, ids, real, aislada }]
+ *       Lecturas ≤ alerta dentro de [a, b) y lecturas aisladas (⚑) con su rango, agrupadas: a 2 m o menos son el mismo punto.
+ *   Descarte.minFuera(s, a, b, rangos, excl)     → { mm, km } | null
+ *       Mínimo de las lecturas dentro de [a, b) que no caen en ningún rango tildado.
+ *   excl: rangos de lecturas aisladas ya clasificadas «dato erróneo» (no cuentan, como en c29).
+ *
+ * Tolerancias iguales a las de la base (_dentro: 0,5 m; dato erróneo: 1,5 m), para que la base
+ * acepte lo que la app calcula.
+ * ===================================================================== */
+(function (global) {
+  'use strict';
+  var TOL = 0.0005, TOL_EXCL = 0.0015, JUNTAR = 0.002;
+
+  function enRango(k, rangos, tol) {
+    for (var i = 0; i < rangos.length; i++) if (k >= rangos[i][0] - tol && k <= rangos[i][1] + tol) return true;
+    return false;
+  }
+  // Lecturas válidas del vano: [[km, mm], ...] ordenadas por km
+  function lecturas(s, a, b, excl) {
+    excl = excl || [];
+    var out = [], paso = s.paso_km, i0 = Math.max(0, Math.ceil((a - s.km0) / paso - 1e-9)), i1 = Math.min(s.n - 1, Math.floor((b - s.km0) / paso - 1e-9));
+    for (var i = i0; i <= i1; i++) {
+      var x = s.vals[i];
+      if (x >= 0) { var k = +(s.km0 + i * paso).toFixed(5); if (!enRango(k, excl, TOL_EXCL)) out.push([k, (x + 5000) / 1000]); }
+    }
+    (s.sueltos || []).forEach(function (p) { if (p[0] >= a && p[0] < b && !enRango(p[0], excl, TOL_EXCL)) out.push([+p[0], +p[1]]); });
+    out.sort(function (x, y) { return x[0] - y[0]; });
+    return out;
+  }
+  // anomalias: lecturas aisladas (⚑) de esa medición en el vano [{ id, km_desde, km_hasta, valor_min_mm, clasificacion }].
+  // Las «sin revisar» y «real» son puntos con su rango completo (el valor bajo puede estar entre dos lecturas de la grilla);
+  // las ya clasificadas «dato erróneo» o «verificada en campo» van en excl y no cuentan.
+  function puntosBajos(s, a, b, alerta, excl, anomalias) {
+    var iv = [];
+    (anomalias || []).forEach(function (x) {
+      if (x.clasificacion !== 'sin_revisar' && x.clasificacion !== 'real') return;
+      var kd = Math.max(+x.km_desde, a), kh = Math.min(+x.km_hasta, b);
+      if (kh < kd) return;
+      iv.push({ km_desde: kd, km_hasta: kh, min_mm: +x.valor_min_mm, km_min: null, ids: [x.id], real: x.clasificacion === 'real', aislada: true });
+    });
+    lecturas(s, a, b, excl).forEach(function (l) {
+      if (l[1] <= alerta + 1e-9) iv.push({ km_desde: l[0], km_hasta: l[0], min_mm: l[1], km_min: l[0], ids: [], real: false, aislada: false });
+    });
+    iv.sort(function (x, y) { return x.km_desde - y.km_desde || y.km_hasta - x.km_hasta; });
+    var pts = [], cur = null;
+    iv.forEach(function (x) {
+      if (cur && x.km_desde <= cur.km_hasta + JUNTAR + 1e-9) {
+        cur.km_hasta = Math.max(cur.km_hasta, x.km_hasta);
+        if (x.min_mm < cur.min_mm || (cur.km_min == null && x.km_min != null && x.min_mm <= cur.min_mm)) { cur.min_mm = Math.min(cur.min_mm, x.min_mm); if (x.km_min != null) cur.km_min = x.km_min; }
+        cur.ids = cur.ids.concat(x.ids); cur.real = cur.real || x.real; cur.aislada = cur.aislada || x.aislada;
+      } else { cur = Object.assign({}, x); pts.push(cur); }
+    });
+    pts.forEach(function (p) {
+      if (p.km_min == null) p.km_min = +((p.km_desde + p.km_hasta) / 2).toFixed(5);
+      p.km_desde = +p.km_desde.toFixed(5); p.km_hasta = +p.km_hasta.toFixed(5);
+      p.min_mm = Math.round(p.min_mm * 1000) / 1000;
+      p.largo_m = Math.round((p.km_hasta - p.km_desde) * 1000 * 10) / 10 + 0.5;
+    });
+    return pts;
+  }
+  function minFuera(s, a, b, rangos, excl) {
+    var best = null;
+    lecturas(s, a, b, excl).forEach(function (l) {
+      if (!enRango(l[0], rangos || [], TOL) && (best == null || l[1] < best.mm)) best = { mm: l[1], km: l[0] };
+    });
+    if (best) best.mm = Math.round(best.mm * 1000) / 1000;
+    return best;
+  }
+  global.Descarte = { puntosBajos: puntosBajos, minFuera: minFuera, lecturas: lecturas };
+})(typeof window !== 'undefined' ? window : globalThis);
+</script><script>/* js/curva.js */
 /* =====================================================================
  * curva.js — Curva de desgaste (altura residual del hilo, mm) a lo largo de la vía
  * La usan Tramo y vía, Cantón (c15) y la Ficha de vano (c03). ECharts 6.1.0,
@@ -1832,8 +1927,11 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       Conexion.leerTodo('limite_tramo', { columnas: 'id, recorrido, via, tramo, piquete_desde, piquete_hasta, km_desde, km_hasta' })
         .then(function (x) { return x.error ? { datos: [], error: null, faltaLimites: true } : x; }),
       // c48: pedidos de verificación pendientes (script 18), para «en verificación desde dd-mm». Sin el 18 se sigue sin ellos.
-      Conexion.leerTodo('v_pedido_verificacion', { columnas: 'id, recorrido, via, km_desde, km_hasta, piquete_desde, piquete_hasta, pedido_en, pedido_nombre, nota, n_vanos, n_faltan, faltan_ids', filtros: [['eq', 'estado', 'pendiente']] })
-        .then(function (x) { return x.error ? { datos: [], error: null, faltaPedidos: true } : x; })
+      Conexion.leerTodo('v_pedido_verificacion', { columnas: 'id, recorrido, via, km_desde, km_hasta, piquete_desde, piquete_hasta, pedido_en, pedido_nombre, nota, n_vanos, n_faltan, faltan_ids, tipo', filtros: [['eq', 'estado', 'pendiente']] })
+        .then(function (x) { return x.error ? { datos: [], error: null, faltaPedidos: true } : x; }),
+      // c59: alarmas descartadas vigentes (script 19). Sin el 19 se sigue sin ellas.
+      Conexion.leerTodo('v_descarte_lectura', { columnas: 'id, pedido_id, vano_id, fecha, valor_antes, estado_antes, nota', filtros: [['is', 'anulado_en', null]] })
+        .then(function (x) { return x.error ? { datos: [], error: null } : x; })
     ]);
     var err = rs.map(function (r) { return r.error; }).filter(Boolean)[0];
     if (err) return { error: err };
@@ -1894,7 +1992,10 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
     //      «Se cierra solo lo que se mide» (Sebastián, 26/10): un vano ya medido con calibre después del pedido no lleva v.ped.
     M.faltaPedidos = !!rs[8].faltaPedidos; M.PED = rs[8].datos.map(function (p) { return Object.assign({}, p, { a: +p.km_desde, b: +p.km_hasta }); })
       .sort(function (x, y) { return String(x.pedido_en).localeCompare(String(y.pedido_en)); });
-    M.PED.forEach(function (p) { (M.RV[p.recorrido + '|' + p.via] || []).forEach(function (v) { if (!v.ped && v.ki < p.b - 0.0005 && v.kf > p.a + 0.0005 && (!p.faltan_ids || p.faltan_ids.indexOf(v.vano_id) >= 0)) v.ped = p; }); });
+    M.PED.forEach(function (p) { (M.RV[p.recorrido + '|' + p.via] || []).forEach(function (v) {
+      if (p.tipo === 'descartar') { if (!v.pedDesc && v.ki < p.b - 0.0005 && v.kf > p.a + 0.0005 && (v.estado === 'critico' || v.estado === 'alerta')) v.pedDesc = p; return; }   // c59: la alarma sigue
+      if (!v.ped && v.ki < p.b - 0.0005 && v.kf > p.a + 0.0005 && (!p.faltan_ids || p.faltan_ids.indexOf(v.vano_id) >= 0)) v.ped = p; }); });
+    rs[9].datos.forEach(function (d) { var v = M.VID[d.vano_id]; if (v && (!v.desc || d.fecha > v.desc.fecha)) v.desc = d; });   // c59
     return { error: null, M: M };
   }
 
@@ -2244,7 +2345,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       var tolK = Math.max(0.004, 8 / (geo.W - geo.ml - geo.mr) * (vb - va));   // c38: 8 px o 4 m
       TNS.filter(function (p) { return k >= p.km - tolK && k <= p.b + tolK; }).forEach(function (p) {   // c49: toda la zona
         hijos.push(h('div', { class: 'rd-tip-tn' }, 'Tramo neutro (planilla)' + (p.pd && p.ph && p.b > p.km ? ' ' + p.pd + ' a ' + p.ph : '') + ', ' + km(p.km) +
-          (p.b > p.km ? '–' + nf(p.b, 3) + ' (' + nf((p.b - p.km) * 1000, 0) + ' m)' : '') + ': aislador entre fases distintas, posible golpe del pantógrafo'));
+          (p.b > p.km ? '–' + nf(p.b, 3) + ' (' + nf((p.b - p.km) * 1000, 0) + ' m)' : '') + ': sección de fibra de vidrio entre fases, sin hilo de contacto (la lectura ahí no es desgaste)'));
       });
       TRS.filter(function (p) { return k >= p.km - tolK && k <= p.b + tolK; }).forEach(function (p) {   // c49
         hijos.push(h('div', { class: 'rd-tip-sec' }, 'Transición de sección ' + p.de + ' → ' + p.al + ' mm² (planilla)' + (p.pd && p.ph ? ' ' + p.pd + ' a ' + p.ph : '') + ', ' +
@@ -2425,7 +2526,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       h('span', null, h('i', { style: 'background:#7a4b00;height:4px' }), '⚑ dato a confirmar'),
       MINS.length ? h('span', null, h('b', { class: 'rd-tri' }, '▼'), 'mínimo del vano (da el estado; en normal, solo de cerca)') : null,
       CAL.length ? h('span', null, h('i', { class: 'rd-rombo' }), 'lectura de calibre (verificación en campo)') : null,
-      TNS.length ? h('span', null, h('i', { style: 'background:rgba(123,31,162,.25)' }), 'tramo neutro (planilla): aislador entre fases distintas, posible golpe') : null,
+      TNS.length ? h('span', null, h('i', { style: 'background:rgba(123,31,162,.25)' }), 'tramo neutro (planilla): fibra de vidrio, sin hilo; la lectura ahí no es desgaste') : null,
       TRS.length ? h('span', null, h('i', { style: 'background:rgba(0,121,107,.22)' }), 'transición de sección 170 → 110 mm² (planilla): el equipo puede dar un aviso que no es desgaste') : null,
       CSEC.length ? h('span', null, h('i', { style: 'background:#b2dfdb;border-left:2px dashed #00796b' }), 'cambio de sección del hilo (según los datos; «?» = a confirmar)') : null,
       h('span', null, h('i', { style: 'background:#c62828;height:4px' }), 'zona sin medición'),
@@ -4632,6 +4733,7 @@ if (typeof module !== "undefined") module.exports = { combinadas: combinadas, el
       if (v.hilo_intervenido_despues) notas.push(h('span', { class: 'chip' }, 'hilo intervenido ' + UI.fecha(v.hilo_intervenido_despues)));
       if (v.fuente === 'calibre') notas.push(h('span', { class: 'chip vig', title: 'El estado sale de una verificación en campo con calibre' }, 'calibre ' + UI.fecha(v.fecha_verificacion)));   // c29
       if (v.ped) notas.push(UI.chipPedido(v));   // c48
+      UI.chipsDescarte(v).forEach(function (c) { notas.push(c); });   // c59
       if (v.antiguedad_dias > 365) notas.push(h('span', { class: 'chip viejo' }, 'medido hace más de 1 año'));
       return fila(T().rutaVano(v), [td(h('a', { href: T().rutaVano(v) }, pqs(v.piquete_desde, v.piquete_hasta)), 'pq'), td(km(v.ki), 'nw'), td(nf(v.L, 1), 'n'), td(h('b', null, mm(v.val)), 'n'), td(estChip(v.estado)),
         td(v.fecha_dato ? [h('span', { class: 'nw' }, UI.fecha(v.fecha_dato)), peq(hace(v.fecha_dato))] : dim('—')),
@@ -4676,7 +4778,8 @@ if (typeof module !== "undefined") module.exports = { combinadas: combinadas, el
       [boton(antC ? Mo.rutaCanton(x.num, x.via, antC.num, antC.s) : null, '← ' + (antC ? 'Cantón ' + antC.num : 'anterior'), false, !antC),
        boton(sigC ? Mo.rutaCanton(x.num, x.via, sigC.num, sigC.s) : null, (sigC ? 'Cantón ' + sigC.num : 'siguiente') + ' →', false, !sigC),
        boton(Rutas.hacia('tramo', x.num, UI.viaARuta(x.via), 'canton', C.n, 'informe') + sufijo, 'Informe del cantón', true)]
-        .concat(window.PantallaCampo ? window.PantallaCampo.botones(ctx, Rutas.hacia('tramo', x.num, UI.viaARuta(x.via), 'canton', C.n), sufijo) || [] : []))];   // c29
+        .concat(window.PantallaCampo ? window.PantallaCampo.botones(ctx, Rutas.hacia('tramo', x.num, UI.viaARuta(x.via), 'canton', C.n), sufijo) || [] : [])
+        .concat(Conexion.puede(ctx.sesion, 'descartar') && vs.some(function (v) { return (v.estado === 'critico' || v.estado === 'alerta') && v.fuente !== 'calibre'; }) ? [boton(Rutas.hacia('tramo', x.num, UI.viaARuta(x.via), 'canton', C.n, 'descartar') + sufijo, 'Pedir descartar la alarma', false)] : []))];   // c29, c59
     var notas = [];
     if (tec && C.segsC.length > 1) notas.push(h('div', { class: 'rd-aviso gris' }, h('b', null, 'El cantón cruza una estación: '), 'aparece en ' + C.segsC.map(function (y) { return y.nombre; }).join(' y ') + '. Acá se ven todos sus vanos.'));
     if (tec && Object.keys(tramos).length > 1) notas.push(h('div', { class: 'rd-aviso gris' }, h('b', null, 'El cantón cruza el límite de tramos ' + Object.keys(tramos).join(' y ') + ': '), 'acá se ven todos sus vanos.'));
@@ -4687,6 +4790,8 @@ if (typeof module !== "undefined") module.exports = { combinadas: combinadas, el
     if (peds.length) notas.push(h('div', { class: 'rd-aviso ped' }, h('b', null, 'En verificación desde el ' + UI.fecha(peds[0].pedido_en) + ': '), peds.map(function (p, k) {
       return [k ? '; ' : '', h('a', { href: '#/campo/pedido/' + p.id }, p.piquete_desde + ' → ' + p.piquete_hasta), p.pedido_nombre ? ' (' + p.pedido_nombre + ')' : ''];
     }), '. No cambia el estado.'));
+    var pdes = []; vs.forEach(function (v) { if (v.pedDesc && pdes.indexOf(v.pedDesc) < 0) pdes.push(v.pedDesc); });   // c59
+    if (pdes.length) notas.push(h('div', { class: 'rd-aviso ped' }, h('b', null, 'Descarte pedido: '), pdes.map(function (p, k) { return [k ? '; ' : '', h('a', { href: '#/campo/pedido/' + p.id }, p.piquete_desde + ' → ' + p.piquete_hasta), p.pedido_nombre ? ' (' + p.pedido_nombre + ')' : '']; }), '. La alarma sigue hasta que se valide.'));
     b.push(avisoParciales(M));
     if (notas.length) b.push(h('div', { class: 'rd-avisos' }, notas));
     if (tec) b.push(kpis(r, null));
@@ -5128,6 +5233,7 @@ if (typeof module !== "undefined") module.exports = { combinadas: combinadas, el
     if (v.hilo_intervenido_despues) n.push(h('span', { class: 'chip' }, 'hilo intervenido ' + UI.fecha(v.hilo_intervenido_despues)));
     if (v.fuente === 'calibre') n.push(h('span', { class: 'chip vig' }, 'calibre ' + UI.fecha(v.fecha_verificacion)));   // c29
     if (v.ped) n.push(UI.chipPedido(v));   // c48
+    UI.chipsDescarte(v).forEach(function (c) { n.push(c); });   // c59
     return n;
   }
 
@@ -5681,6 +5787,7 @@ if (typeof module !== "undefined") module.exports = { combinadas: combinadas, el
           h('a', { class: 'btn chico', href: rutaInf }, 'Informe del vano'),
           window.PantallaCampo ? PantallaCampo.botones(ctx, Rutas.hacia('vano', UI.viaARuta(via), vn.piquete_desde), rutaInf.indexOf('?') >= 0 ? rutaInf.slice(rutaInf.indexOf('?')) : '') : null)),   // c29
       pedido,
+      window.PantallaCampo && ctx.sesion && ctx.sesion.rol ? PantallaCampo.tarjetaQueHago(ctx, vn, e) : null,   // c59
       otros.length ? h('div', { class: 'msg info', role: 'status' }, 'Del piquete ' + cod + ' también arranca ', otros.map(function (x, k) {
         return [k ? ' y ' : '', h('a', { href: rutaFicha(x) }, 'el vano ' + x.piquete_desde + ' → ' + x.piquete_hasta + ' (tramo ' + x.tramo + ')')];
       }), ' (bifurcación: hojas distintas de la planilla).') : null,
@@ -6088,6 +6195,7 @@ if (typeof module !== "undefined") module.exports = { combinadas: combinadas, el
     if (v.hilo_intervenido_despues) n.push(h('span', { class: 'chip' }, 'hilo intervenido ' + UI.fecha(v.hilo_intervenido_despues)));
     if (v.fuente === 'calibre') n.push(h('span', { class: 'chip vig', title: 'El estado sale de una verificación en campo con calibre' }, 'calibre ' + UI.fecha(v.fecha_verificacion)));   // c29
     if (v.ped) n.push(UI.chipPedido(v));   // c48
+    UI.chipsDescarte(v).forEach(function (c) { n.push(c); });   // c59
     return n;
   }
   function textoNotas(v) {
@@ -6098,6 +6206,8 @@ if (typeof module !== "undefined") module.exports = { combinadas: combinadas, el
     if (v.hilo_intervenido_despues) n.push('hilo intervenido el ' + UI.fecha(v.hilo_intervenido_despues) + ', después del dato');
     if (v.fuente === 'calibre') n.push('verificado con calibre el ' + UI.fecha(v.fecha_verificacion));   // c29
     if (v.ped) n.push('en verificación desde ' + UI.fecha(v.ped.pedido_en));   // c48
+    if (v.pedDesc) n.push('descarte pedido el ' + UI.fecha(v.pedDesc.pedido_en));   // c59
+    if (v.desc) n.push('alarma del ' + UI.fecha(v.desc.fecha) + ' descartada: ' + (v.desc.nota || ''));   // c59
     return n.join('; ');
   }
 
@@ -6416,7 +6526,7 @@ if (typeof module !== "undefined") module.exports = { combinadas: combinadas, el
         var f = filas[i], v = f.v;
         tbody.appendChild(h('tr', { class: f.fila },
           td('Vano', h('a', { href: T().rutaVano(v) }, T().nombreVano(v)), 'vano'),
-          td('Dónde', [donde(v), v.ped ? h('div', null, UI.chipPedido(v)) : null]),   // c48: «en verificación desde dd-mm»
+          td('Dónde', [donde(v), v.ped ? h('div', null, UI.chipPedido(v)) : null, v.pedDesc || v.desc ? h('div', null, UI.chipsDescarte(v)) : null, window.PantallaCampo && window.App && App.sesion ? PantallaCampo.accionesFila({ sesion: App.sesion() }, v) : null]),   // c48 · c59: pedir desde el listado
           f.celdas.map(function (c, j) { var col = cols[j + 2]; return td(col, c, (numCol[col] ? 'num' : '') + (col === 'Altura del hilo' ? ' fuerte' : '')); })));
       }
       mostrados = hasta;
@@ -7304,7 +7414,7 @@ if (typeof module !== "undefined") module.exports = { combinadas: combinadas, el
     fuera: { t: 'Fuera de vía principal', d: 'lecturas en cuadros de estación y uniones entre tramos (fuera de los límites de cada tramo, c39): no cuentan en los pendientes ni en la Red; se pueden clasificar igual' }
   };
   var CLAS = { sin_revisar: 'Sin revisar', real: 'Real', dato_erroneo: 'Dato erróneo', verificada_campo: 'Verificada en campo' };   // c29
-  var NOTAS_ERRONEO = ['Cruce de vía: el Geismar pierde la referencia.', 'Tierra o suciedad en la vía: pierde la referencia.', 'Paso a nivel.', 'Aparato de vía (cambio).'];
+  var NOTAS_ERRONEO = ['Tramo neutro: sección de fibra de vidrio, sin hilo; no es desgaste.', 'Cruce de vía: el Geismar pierde la referencia.', 'Tierra o suciedad en la vía: pierde la referencia.', 'Paso a nivel.', 'Aparato de vía (cambio).'];
   var NOTAS_REAL = ['Verificado en campo: desgaste real.', 'Se repite en el mismo punto en otras mediciones.'];
 
   function nombreVano(r) { return r.piquete_desde + ' → ' + r.piquete_hasta; }
@@ -7965,12 +8075,31 @@ if (typeof module !== "undefined") module.exports = { combinadas: combinadas, el
         'Cuando la guardia mide con calibre, la planilla escaneada se le manda por mail al operador, que carga las lecturas. Así el vano se actualiza y el ⚑ se cierra.',
         'Después revisá en «En campo» lo cargado de tu tramo: si no coincide con la planilla, avisale al operador para que lo corrija.'],
         ir: ['#/listados/verificar', 'Ir a Para verificar'] },
+      { id: 'critico', para: 'descarta', q: '¿Cómo resuelvo un crítico o una alerta?', pasos: [   // c59
+        'Hay dos caminos, y se ven en la ficha del vano, en «¿Qué hago con este vano?»: medirlo con calibre, o descartarlo si es una falsa lectura. Decide quién conoce la zona.',
+        'Medirlo: «Pedir verificación» → la cuadrilla mide con calibre → la planilla escaneada le llega al operador, que la carga → el pedido se cierra solo y el vano toma el valor del calibre.',
+        'Falsa lectura (tramo neutro, aislador de sección, aguja o cambio, cruce de vía, paso a nivel, transición de sección): «Pedir descartar la alarma», con el motivo. Sirve con o sin ⚑. En el tramo neutro no hay hilo de contacto: es una sección de fibra de vidrio, y esa lectura no es desgaste.',
+        'Mientras no se valide, la alarma sigue y el vano muestra «descarte pedido». Un operador o administrador tilda los puntos bajos que son falsa lectura (y, si se midió, carga el calibre del punto), o lo rechaza con el motivo.',
+        'El vano queda con lo que midió el Geismar fuera de los puntos tildados, o con el calibre si es menor. Un vano no se descarta entero, y nunca se toma la medición anterior.',
+        'El descarte vale solo para esa medición: una medición nueva del Geismar vuelve a mandar. Queda con nombres y fecha, un cartel en la ficha, y un operador o administrador lo puede deshacer.',
+        'Si el pedido ya estaba hecho con «Pedir verificación» y resulta falsa lectura, el operador lo clasifica como dato erróneo en Revisión (si tiene ⚑) y cierra el pedido sin cargar, con el motivo.'],
+        ir: ['#/listados/atender', 'Ir a Para atender'] },
+      { id: 'descarte', para: 'informa', q: '¿Qué hago con un pedido de descarte?', pasos: [   // c59, revisión 15/11
+        'El número junto a «En campo» suma los pedidos pendientes, de verificación y de descarte. Abrilo en «En campo» → Pedidos.',
+        'Cada vano del pedido muestra sus puntos bajos (lecturas en alerta o crítico, y las ⚑), todos tildados. Destildá los que no sean falsa lectura. Varios puntos de un vano se validan juntos.',
+        'Si se midió con calibre, cargá el valor en el punto, con la fecha y quién midió. Abajo de cada vano se ve cómo queda: lo del Geismar fuera de los puntos tildados, o el calibre si es menor.',
+        'Un vano no se descarta entero: si tildás todas sus lecturas, tenés que cargar el calibre de algún punto. El tramo neutro se valida igual que cualquier tramo.',
+        'Mirá el gráfico del vano. Sin calibre se descarta sin medir: si es un desgaste real, lo estarías tapando.',
+        '«Aceptar los puntos tildados» (dos toques) cambia el estado al instante; un vano sin puntos tildados sigue con su alarma. «Rechazar el descarte» pide el motivo.',
+        'Un punto que toca una lectura clasificada «real» no se puede tildar: primero se deshace esa clasificación en Revisión. Una alarma que sale del calibre no se descarta: se anula esa verificación.',
+        'Si te equivocaste, abrí el pedido y usá «Deshacer el descarte»: la alarma vuelve.'],
+        ir: ['#/campo', 'Ir a En campo'] },
       { id: 'pedido', para: 'pide', q: '¿Cómo mando a verificar un vano o un cantón?', pasos: [   // c48
         'Entrá a la ficha del vano (o a la pantalla del cantón) y tocá «Pedir verificación».',
         'Elegí el sector (desde el piquete, hasta el piquete) y, si querés, escribí qué mirar. Tocá «Pedir la verificación».',
         'No cambia el estado del vano ni manda mails: en la ficha y en los listados el vano queda «en verificación desde» la fecha, y los operadores lo ven con un número junto a «En campo».',
         'Se cierra solo lo que se mide: cada vano con lecturas de calibre deja de figurar «en verificación», y el pedido se cierra cuando están medidos todos los vanos del sector. Si no hizo falta medir el resto, el operador lo cierra con el motivo.',
-        'Si lo pediste por error, abrilo en «En campo» → Pedidos de verificación y tocá «Cancelar el pedido» con el motivo.'],
+        'Si lo pediste por error, abrilo en «En campo» → Pedidos y tocá «Cancelar el pedido» con el motivo.'],
         ir: ['#/campo', 'Ir a En campo'] },
       { id: 'calibre', para: 'informa', q: '¿Cómo cargo una verificación con calibre?', pasos: [
         'Las lecturas llegan por mail: la planilla de la guardia, escaneada, que manda el jefe de base. Tenela abierta mientras cargás.',
@@ -7982,7 +8111,7 @@ if (typeof module !== "undefined") module.exports = { combinadas: combinadas, el
         ir: ['#/campo', 'Ir a En campo'] },
       { id: 'pedidoop', para: 'informa', q: '¿Qué hago con un pedido de verificación?', pasos: [   // c48
         'El número junto a «En campo» (en el celular, en «Más») suma los pedidos de verificación pendientes.',
-        'En «En campo» → Pedidos de verificación, tocá el pedido: dice quién lo pidió, el sector y qué mirar.',
+        'En «En campo» → Pedidos, tocá el pedido: dice quién lo pidió, el sector y qué mirar.',
         'Cuando llegue la planilla de la guardia, tocá «Cargar la verificación» y cargala como siempre. Cada vano con lecturas queda medido; cuando están todos los vanos del sector, el pedido se cierra solo.',
         'Si se midió solo una parte, el pedido dice «medidos N de M vanos» y cuáles faltan. Si el resto no hace falta (por ejemplo, se midió solo el vano sospechoso), abrí «Cerrar sin cargar la verificación» y escribí el motivo.',
         'Si se anula una verificación y faltan vanos otra vez, el pedido vuelve a quedar pendiente.'],
@@ -8004,7 +8133,7 @@ if (typeof module !== "undefined") module.exports = { combinadas: combinadas, el
         'Es la lista de verificaciones con calibre e intervenciones que cargaron los operadores y administradores, con quién y cuándo.',
         'Tocá una para ver las lecturas, cómo quedó cada vano y el gráfico.',
         'En la ficha de cada vano, «En campo» muestra lo que se cargó en ese vano.',
-        'Arriba están los pedidos de verificación: sectores que un jefe de base o Coordinación mandó a verificar. No cambian el estado; se ven como «en verificación desde».'],
+        'Arriba están los pedidos: sectores que Análisis y gestión mandó a verificar (no cambian el estado; se ven como «en verificación desde») o pidió descartar (se ven como «descarte pedido»; la alarma sigue hasta que se valide).'],
         ir: ['#/campo', 'Ir a En campo'] },
       { id: 'sininfo', para: 'todos', q: '¿Dónde no hay información reciente?', pasos: [
         'Listados → Sin información reciente: vanos sin medición válida, nunca medidos o con la última medición de hace más de 1 año.',
@@ -8072,7 +8201,7 @@ if (typeof module !== "undefined") module.exports = { combinadas: combinadas, el
         'Si un informe se reprocesó, cargá el informe nuevo en Carga de medición: la app ofrece reemplazar la publicada sin perder las clasificaciones (ver «¿Cómo cargo una medición nueva?»).'],
         ir: ['#/mediciones', 'Ir a Mediciones'] },
       { id: 'usuarios', para: 'admin', q: '¿Cómo doy de alta o de baja a un usuario?', pasos: [
-        'Administración → Usuarios → Agregar usuario: mail institucional, nombre, perfil (y cargo si es Análisis y gestión). El cargo decide quién puede pedir verificación: Jefe de base y Coordinación.',
+        'Administración → Usuarios → Agregar usuario: mail institucional, nombre, perfil (y cargo si es Análisis y gestión). El cargo es solo un dato: todo Análisis y gestión puede pedir verificación o descarte.',
         'No hace falta mandar la contraseña provisoria que muestra la app: el usuario entra con «Olvidé mi contraseña» y su mail institucional, y elige la suya con el código que le llega.',
         'Olvido de contraseña: «Reiniciar contraseña» en su fila. Baja: «Desactivar» (tocando dos veces). Nunca se borra un usuario.',
         'No desactives «Copia diaria (automática)»: lo usa la copia de seguridad todas las noches.'],
@@ -8142,7 +8271,7 @@ if (typeof module !== "undefined") module.exports = { combinadas: combinadas, el
     if (!ctx.vigente()) return;
     var adm = Conexion.puede(ctx.sesion, 'administrar');
     var lista = preguntas(ref && !ref.error ? ref : null).filter(function (p) {
-      return p.para === 'todos' || (p.para === 'pide' && Conexion.puede(ctx.sesion, 'pedir')) || (p.para === 'informa' && Conexion.puede(ctx.sesion, 'informar')) || (p.para === 'operador' && ctx.tec) || (p.para === 'admin' && adm);
+      return p.para === 'todos' || (p.para === 'pide' && Conexion.puede(ctx.sesion, 'pedir')) || (p.para === 'descarta' && Conexion.puede(ctx.sesion, 'descartar')) || (p.para === 'informa' && Conexion.puede(ctx.sesion, 'informar')) || (p.para === 'operador' && ctx.tec) || (p.para === 'admin' && adm);
     });
     var abrir = ctx.query.p || null;
     function item(p) {
@@ -8151,7 +8280,7 @@ if (typeof module !== "undefined") module.exports = { combinadas: combinadas, el
         h('ol', null, p.pasos.map(function (t) { return h('li', null, t); })),
         p.ir ? h('div', { class: 'ay-ir' }, h('a', { class: 'btn chico', href: p.ir[0] }, p.ir[1])) : null);
     }
-    var generales = lista.filter(function (p) { return p.para === 'todos' || p.para === 'pide'; }).map(item);
+    var generales = lista.filter(function (p) { return p.para === 'todos' || p.para === 'pide' || p.para === 'descarta'; }).map(item);
     var campo = lista.filter(function (p) { return p.para === 'informa'; }).map(item);   // c29
     var tecnicas = lista.filter(function (p) { return p.para === 'operador' || p.para === 'admin'; }).map(item);
     ctx.el.replaceChildren(
@@ -8245,7 +8374,7 @@ if (typeof module !== "undefined") module.exports = { combinadas: combinadas, el
       var cargo = h('select', { id: 'us-cargo' }, opciones(CARGO, u ? u.cargo : '', 'Elegí el cargo'));
       var base = h('select', { id: 'us-base' }, [h('option', { value: '' }, 'Sin base')].concat(BASES.map(function (b) { return h('option', { value: b, selected: u && u.base === b ? true : null }, b); })));
       var campoCargo = h('div', { class: 'campo' }, h('label', { for: 'us-cargo' }, 'Cargo'), cargo,
-        h('small', { class: 'nota' }, 'Análisis y gestión solo consulta: no carga ni valida datos (Coordinación, 23/10/2026).'));
+        h('small', { class: 'nota' }, 'Análisis y gestión consulta y pide (verificar o descartar): no carga ni valida datos. El cargo es solo un dato.'));
       function verCargo() { campoCargo.hidden = perfil.value !== 'gestion'; }
       perfil.addEventListener('change', verCargo); verCargo();
       var guardar = h('button', { class: 'btn', type: 'submit' }, esAlta ? 'Dar de alta' : 'Guardar cambios');
@@ -8484,7 +8613,7 @@ if (typeof module !== "undefined") module.exports = { combinadas: combinadas, el
     var vs = todos.slice(Math.max(0, i0 - extra), Math.min(todos.length, i1 + extra + 1));
     var pqs = vs.map(function (x) { return { cod: x.piquete_desde, km: x.ki, largo: (x.kf - x.ki) * 1000, vano: x }; });
     var ult = vs[vs.length - 1]; pqs.push({ cod: ult.piquete_hasta, km: ult.kf, largo: 0, vano: null });
-    miga.push({ texto: que === 'verificar' ? 'Informar verificación' : que === 'pedir' ? 'Pedir verificación' : 'Informar intervención' });
+    miga.push({ texto: que === 'verificar' ? 'Informar verificación' : que === 'pedir' ? 'Pedir verificación' : que === 'descartar' ? 'Pedir descartar la alarma' : 'Informar intervención' });
     ctx.miga(miga);
     return { M: M, ref: ref, foco: foco, vs: vs, pqs: pqs, rec: foco[0].recorrido, via: foco[0].via, tramo: foco[0].tramo, back: back, nom: nom };
   }
@@ -8542,6 +8671,10 @@ if (typeof module !== "undefined") module.exports = { combinadas: combinadas, el
       if (r.error) return { error: r.error };
       r.datos.forEach(function (a) { (an[a.medicion_id] = an[a.medicion_id] || []).push([+a.km_desde, +a.km_hasta]); });
     }
+    // c59: los puntos validados como falsa lectura en un descarte vigente tampoco cuentan
+    var dl = await Conexion.leer('v_descarte_lectura', { columnas: 'medicion_id, puntos', filtros: [['in', 'vano_id', pedir.map(function (x) { return x.vano_id; })], ['is', 'anulado_en', null]] });
+    if (dl.error) return { error: dl.error };
+    dl.datos.forEach(function (d) { (d.puntos || []).forEach(function (q) { (an[d.medicion_id] = an[d.medicion_id] || []).push([+q.km_desde, +q.km_hasta]); }); });
     await Promise.all(pedir.map(async function (x) {
       var best = null, ok = true;
       for (var i = 0; i < (x.geismar_mediciones || []).length; i++) {
@@ -8842,37 +8975,39 @@ if (typeof module !== "undefined") module.exports = { combinadas: combinadas, el
   // ------------------------------------------------------------------
   // c48: pedidos de verificación
   // ------------------------------------------------------------------
-  var CIERRE_N = { calibre: 'se cargó la verificación', operador: 'cerrado sin cargar', cancelado: 'cancelado' };
+  var CIERRE_N = { calibre: 'se cargó la verificación', operador: 'cerrado sin cargar', cancelado: 'cancelado', aceptado: 'descarte aceptado', rechazado: 'descarte rechazado' };
+  function esDescarte(x) { return x.tipo === 'descartar'; }
   function quienPidio(x) { return (x.pedido_nombre || '—') + (x.pedido_cargo ? ' (' + (CARGO_N[x.pedido_cargo] || x.pedido_cargo) + (x.pedido_base ? ', base ' + x.pedido_base : '') + ')' : ''); }
   function parcial(x) { return x.estado === 'pendiente' && x.n_faltan != null && +x.n_faltan < +x.n_vanos; }
   function estPedido(x) {
-    return x.estado === 'pendiente' ? [h('span', { class: 'chip ped' }, 'en verificación desde ' + UI.diaMes(x.pedido_en)),
+    if (esDescarte(x) && x.deshecho_en) return h('span', { class: 'chip desc' }, 'descarte deshecho ' + UI.diaMes(x.deshecho_en));
+    return x.estado === 'pendiente' ? [h('span', { class: 'chip ped' }, (esDescarte(x) ? 'descarte pedido el ' : 'en verificación desde ') + UI.diaMes(x.pedido_en)),
         parcial(x) ? h('div', { class: 'rd-peq' }, 'medidos ' + (x.n_vanos - x.n_faltan) + ' de ' + x.n_vanos + ' vanos') : null]
       : h('span', { class: x.estado === 'cancelado' ? 'chip desc' : 'chip vig' }, (CIERRE_N[x.cierre] || x.estado) + ' ' + UI.diaMes(x.cerrado_en));
   }
   function tarjetaPedidos(ctx, todos, verTodos) {
     var pend = todos.filter(function (x) { return x.estado === 'pendiente'; }), lista = verTodos ? todos : pend, op = Conexion.puede(ctx.sesion, 'informar');
-    if (!todos.length && !Conexion.puede(ctx.sesion, 'pedir')) return null;
+    if (!todos.length && !Conexion.puede(ctx.sesion, 'descartar')) return null;
     var filas = lista.map(function (x) {
       var ruta = '#/campo/pedido/' + x.id;
       return h('tr', { 'data-go': ruta, tabindex: '0' },
         T().td('Pedido', h('a', { href: ruta }, UI.fecha(x.pedido_en))),
         T().td('Dónde', ['Tramo ' + (x.tramo || '?') + ' · ' + UI.nombreVia(x.via), h('div', { class: 'rd-peq mono' }, x.piquete_desde + ' → ' + x.piquete_hasta + ' · ' + UI.plural(+x.n_vanos || 0, 'vano'))]),
         T().td('Pidió', [x.pedido_nombre || '—', x.pedido_cargo ? h('div', { class: 'rd-peq' }, (CARGO_N[x.pedido_cargo] || x.pedido_cargo) + (x.pedido_base ? ' · ' + x.pedido_base : '')) : null]),
-        T().td('Qué mirar', x.nota || h('span', { class: 'nota' }, '—')),
+        T().td('Qué se pide', [h('b', null, esDescarte(x) ? 'Descartar la alarma' : 'Verificar con calibre'), h('div', { class: 'rd-peq' }, x.nota || '—')]),
         T().td('Estado', estPedido(x), 'notas'));
     });
     var otro = verTodos ? h('a', { href: '#/campo' }, 'Ver solo los pendientes') : todos.length > pend.length ? h('a', { href: '#/campo?ped=todos' }, 'Ver también los cerrados y cancelados') : null;
-    return UI.card('Pedidos de verificación', pend.length ? UI.plural(pend.length, 'pendiente') : 'ninguno pendiente',
-      op && pend.length ? h('div', { class: 'rd-aviso' }, h('b', null, UI.plural(pend.length, 'sector mandado', 'sectores mandados') + ' a verificar en campo. '), 'Se cierran solos al cargar la verificación con calibre; si no hizo falta, cerralo desde el pedido con el motivo.') : null,
-      lista.length ? T().tabla([{ t: 'Pedido' }, { t: 'Dónde' }, { t: 'Pidió' }, { t: 'Qué mirar' }, { t: 'Estado' }], filas, 'cf-pedidos')
-        : h('p', { class: 'nota', style: 'margin:0' }, 'No hay pedidos de verificación pendientes. Los jefes de base y Coordinación los hacen desde la ficha de un vano o la pantalla de un cantón («Pedir verificación»).'),
+    return UI.card('Pedidos', pend.length ? UI.plural(pend.length, 'pendiente') : 'ninguno pendiente',
+      op && pend.length ? h('div', { class: 'rd-aviso' }, h('b', null, UI.plural(pend.length, 'pedido pendiente', 'pedidos pendientes') + '. '), 'Los de verificación se cierran solos al cargar el calibre; si no hizo falta, cerralos con el motivo. Los de descarte se aceptan o se rechazan desde el pedido.') : null,
+      lista.length ? T().tabla([{ t: 'Pedido' }, { t: 'Dónde' }, { t: 'Pidió' }, { t: 'Qué se pide' }, { t: 'Estado' }], filas, 'cf-pedidos')
+        : h('p', { class: 'nota', style: 'margin:0' }, 'No hay pedidos pendientes. Análisis y gestión los hace desde la ficha de un vano o la pantalla de un cantón: «Pedir verificación» o «Pedir descartar la alarma».'),
       otro ? h('p', { class: 'nota' }, otro) : null);
   }
 
   async function pPedir(ctx) {
     if (!Conexion.puede(ctx.sesion, 'pedir')) {
-      ctx.el.replaceChildren(UI.encabezado('Sin permiso'), UI.mensaje('info', 'Mandan a verificar en campo los jefes de base, Coordinación y los administradores. Con tu perfil podés ver los pedidos en «En campo».'),
+      ctx.el.replaceChildren(UI.encabezado('Sin permiso'), UI.mensaje('info', 'Mandan a verificar en campo Análisis y gestión y los administradores: el operador carga la verificación cuando llega la planilla. Con tu perfil podés ver los pedidos en «En campo».'),
         h('p', null, h('a', { class: 'btn sec chico', href: '#/campo' }, 'Ir a En campo')));
       return;
     }
@@ -8903,6 +9038,45 @@ if (typeof module !== "undefined") module.exports = { combinadas: combinadas, el
       h('div', { class: 'acciones' }, bt), msg);
   }
 
+  // c59: pedir descartar la alarma de un vano o sector (falsa lectura). Nota obligatoria; lo valida un operador o administrador.
+  var MOTIVOS_DESCARTE = ['Tramo neutro: sección de fibra de vidrio, sin hilo.', 'Aislador de sección.', 'Aguja o cambio.', 'Cruce de vía.', 'Paso a nivel.', 'Transición de sección.'];
+  async function pDescartar(ctx) {
+    if (!Conexion.puede(ctx.sesion, 'descartar')) {
+      ctx.el.replaceChildren(UI.encabezado('Sin permiso'), UI.mensaje('info', 'Con tu perfil podés ver los pedidos en «En campo».'), h('p', null, h('a', { class: 'btn sec chico', href: '#/campo' }, 'Ir a En campo')));
+      return;
+    }
+    var C = await contexto(ctx, 'descartar'); if (!C) return;
+    ctx.titulo('Pedir descartar la alarma · ' + C.nom);
+    var alarma = function (v) { return (v.estado === 'critico' || v.estado === 'alerta') && v.fuente !== 'calibre'; };
+    var ya = C.foco.map(function (v) { return v.pedDesc; }).filter(Boolean)[0];
+    var conAlarma = C.foco.filter(alarma);
+    var d0 = conAlarma.length ? conAlarma[0] : C.foco[0], d1 = conAlarma.length ? conAlarma[conAlarma.length - 1] : C.foco[C.foco.length - 1];
+    var sDesde = selPiquete(C.pqs, d0.piquete_desde, 'pd-desde'), sHasta = selPiquete(C.pqs, d1.piquete_hasta, 'pd-hasta');
+    var inNota = h('textarea', { id: 'pd-nota', maxlength: '500', placeholder: 'Por qué es una falsa lectura. Ej.: tramo neutro, sección de fibra de vidrio, sin hilo.' });
+    var msg = h('div', { role: 'status' }), bt = h('button', { class: 'btn', type: 'button' }, 'Pedir el descarte');
+    bt.addEventListener('click', async function () {
+      if (inNota.value.trim().length < 10) { msg.replaceChildren(UI.mensaje('error', 'Escribí el motivo (mínimo 10 caracteres).')); return; }
+      bt.disabled = true; msg.replaceChildren(h('div', { class: 'cargando' }, 'Guardando…'));
+      var r = await Conexion.rpc('pedir_verificacion', { datos: { tipo: 'descartar', recorrido: C.rec, via: C.via, piquete_desde: sDesde.value, piquete_hasta: sHasta.value, nota: inNota.value.trim() } });
+      if (r.error) { bt.disabled = false; msg.replaceChildren(UI.mensaje('error', errorBase(r.error))); return; }
+      Mo.limpiar(); if (App.contarPendientes) App.contarPendientes();
+      UI.toast('Pedido guardado. La alarma sigue hasta que un operador o administrador lo valide.');
+      location.hash = '#/campo/pedido/' + r.datos.id;
+    });
+    ctx.el.replaceChildren(
+      h('div', { class: 'rd-cab' }, h('div', null, h('h1', null, 'Pedir descartar la alarma'), h('p', { class: 'sub' }, C.nom + ' · Tramo ' + C.tramo + ' · ' + UI.nombreVia(C.via))),
+        h('div', { class: 'acciones rd-acc' }, h('a', { class: 'btn sec chico', href: C.back }, '← Volver'), Ayuda.boton('critico', 'Ayuda: cómo resolver un crítico'))),
+      ya ? h('div', { class: 'rd-aviso' }, h('b', null, 'Ya hay un descarte pedido el ' + UI.fecha(ya.pedido_en) + ' '), '(' + ya.piquete_desde + ' → ' + ya.piquete_hasta + '). ', h('a', { href: '#/campo/pedido/' + ya.id }, 'Ver el pedido'), '.') : null,
+      !conAlarma.length ? h('div', { class: 'rd-aviso' }, h('b', null, 'Este lugar no tiene una alarma para descartar. '), C.foco.some(function (v) { return v.fuente === 'calibre' && (v.estado === 'critico' || v.estado === 'alerta'); }) ? 'La alarma sale del calibre: si está mal cargado, un operador anula esa verificación.' : 'Se puede elegir otro sector con los piquetes de abajo.') : null,
+      UI.card('Qué alarma se descarta', null, h('div', { class: 'rd-form' },
+        h('label', { for: 'pd-desde' }, 'Desde el piquete', sDesde),
+        h('label', { for: 'pd-hasta' }, 'hasta el piquete', sHasta),
+        h('label', { for: 'pd-nota', class: 'ancho' }, 'Motivo (obligatorio)', inNota)),
+        h('div', { class: 'chips' }, MOTIVOS_DESCARTE.map(function (t) { return h('button', { type: 'button', class: 'chipsel', onclick: function () { inNota.value = t; inNota.focus(); } }, t); })),
+        h('p', { class: 'nota' }, 'Solo cuenta para la medición que dio la alarma: una medición nueva del Geismar vuelve a mandar. Mientras tanto la alarma sigue y el vano muestra «descarte pedido». Un operador o administrador tilda los puntos bajos que son falsa lectura (y, si se midió, carga el calibre): el vano queda con lo que se midió fuera de esos puntos. Un vano no se descarta entero. Queda el nombre de los dos, y se puede deshacer.')),
+      h('div', { class: 'acciones' }, bt), msg);
+  }
+
   // Ruta para cargar la verificación de un pedido: el vano, o el cantón si el pedido es el cantón entero
   function rutaVerificarPedido(M, x) {
     var todos = (M.RV[x.recorrido + '|' + x.via] || []).filter(function (v) { return v.ki < +x.km_hasta - 0.0005 && v.kf > +x.km_desde + 0.0005; });
@@ -8924,7 +9098,8 @@ if (typeof module !== "undefined") module.exports = { combinadas: combinadas, el
     if (!ctx.vigente()) return;
     if (rs[0].error) return Pantallas.errorBase(ctx, /v_pedido_verificacion|does not exist|relation/i.test(rs[0].error) ? 'Falta correr en Supabase el script 18 (base/18_pedido_verificacion.sql).' : rs[0].error);
     if (rs[1].error) return Pantallas.errorBase(ctx, rs[1].error);
-    var x = rs[0].datos[0]; if (!x) return Pantallas.noEncontrada(ctx, 'No existe el pedido de verificación N° ' + ctx.params.id + '.');
+    var x = rs[0].datos[0]; if (!x) return Pantallas.noEncontrada(ctx, 'No existe el pedido N° ' + ctx.params.id + '.');
+    if (esDescarte(x)) return detalleDescarte(ctx, x);   // c59
     ctx.titulo('Pedido de verificación N° ' + x.id);
     var s = ctx.sesion, op = Conexion.puede(s, 'informar'), pend = x.estado === 'pendiente', V = rutaVerificarPedido(rs[1].M, x);
     var puedeCancelar = pend && (Conexion.puede(s, 'administrar') || (s && s.id === x.pedido_por && Conexion.puede(s, 'pedir')));
@@ -8967,9 +9142,209 @@ if (typeof module !== "undefined") module.exports = { combinadas: combinadas, el
       puedeCancelar ? accion('Cancelar el pedido', 'Si se pidió por error o ya no hace falta. Queda tu nombre, la fecha y el motivo.', 'cancelar_pedido_verificacion', 5, 'Ej.: lo pedí en la vía equivocada.', 'Cancelar el pedido') : null);
   }
 
-  // Aviso arriba en la ficha del vano: «en verificación desde …»
+  // c59 (revisión 15/11/2026): detalle de un pedido de descarte. El operador o administrador tilda los puntos bajos de cada vano
+  // que valida como falsa lectura (todos vienen tildados) y, si se midió, carga el calibre del punto. El vano queda con el mínimo
+  // entre lo del Geismar fuera de los puntos tildados y el calibre. Un vano no se descarta entero. Nunca se toma la medición anterior.
+  function estadoDe(v, f) { return v == null ? 'sin_dato' : v <= +f.limite_mm ? 'critico' : v <= +f.alerta_mm ? 'alerta' : 'normal'; }
+  function posPunto(f, p) {
+    var a = (p.km_desde - f.km_inicio) * 1000, b = (p.km_hasta - f.km_inicio) * 1000;
+    return f.piquete_desde + ' + ' + (Math.abs(b - a) < 0.6 ? UI.num(Math.max(0, a), 1) + ' m' : UI.num(Math.max(0, a), 1) + ' a ' + UI.num(b, 1) + ' m');
+  }
+  async function armarPuntos(filas) {
+    var fallas = [];
+    await Promise.all(filas.filter(function (f) { return f.vigente; }).map(async function (f) {
+      try {
+        var s = await Serie.leer({ id: f.medicion_id, storage_path: f.storage_path });
+        var an = f.anomalias || [];
+        f.excl = an.filter(function (a) { return a.clasificacion === 'dato_erroneo' || a.clasificacion === 'verificada_campo'; }).map(function (a) { return [+a.km_desde, +a.km_hasta]; });
+        f.serie = s;
+        f.puntos = Descarte.puntosBajos(s, +f.km_inicio, +f.km_fin, +f.alerta_mm, f.excl, an).map(function (p) { p.tildado = !p.real; p.calibre = null; return p; });
+      } catch (e) { fallas.push(f.piquete_desde); f.puntos = null; }
+    }));
+    return fallas;
+  }
+  // Cómo queda un vano con lo tildado: { valor, km, origen, fuera } o { error }
+  function quedaVano(f) {
+    var tild = (f.puntos || []).filter(function (p) { return p.tildado; });
+    if (!tild.length) return { nada: true };
+    var fuera = Descarte.minFuera(f.serie, +f.km_inicio, +f.km_fin, tild.map(function (p) { return [p.km_desde, p.km_hasta]; }), f.excl);
+    var cal = null; tild.forEach(function (p) { if (p.calibre != null && !isNaN(p.calibre) && (cal == null || p.calibre < cal.mm)) cal = { mm: p.calibre, km: p.km_min }; });
+    if (cal && (!fuera || cal.mm <= fuera.mm)) return { valor: cal.mm, km: cal.km, origen: 'calibre', fuera: fuera };
+    if (fuera) return { valor: fuera.mm, km: fuera.km, origen: 'serie', fuera: fuera };
+    return { error: 'Se tildaron todas las lecturas del vano: un vano no se descarta entero. Destildá algún punto o cargá el valor del calibre.' };
+  }
+  function tarjetaVano(f, alCambiar) {
+    var res = h('div', { class: 'cf-queda', role: 'status' });
+    function pintar() {
+      var q = quedaVano(f);
+      res.replaceChildren(q.nada ? h('span', { class: 'nota' }, 'Sin puntos tildados: este vano queda con su alarma.')
+        : q.error ? UI.mensaje('error', q.error)
+        : h('span', null, h('b', null, 'Queda: '), UI.mm(q.valor), ' ', UI.chipEstado(estadoDe(q.valor, f)), ' ',
+           h('span', { class: 'nota' }, q.origen === 'calibre' ? 'calibre de un punto tildado' : 'lectura más baja del Geismar fuera de los puntos tildados (' + posPunto(f, { km_desde: q.km, km_hasta: q.km }) + ')')));
+      alCambiar();
+    }
+    var filas = (f.puntos || []).map(function (p, i) {
+      var ck = h('input', { type: 'checkbox', checked: p.tildado ? true : null, disabled: p.real ? true : null, 'aria-label': 'Validar como falsa lectura el punto ' + (i + 1) });
+      var ic = h('input', { inputmode: 'decimal', class: 'cf-cal', placeholder: 'mm', disabled: p.tildado ? null : true, 'aria-label': 'Calibre del punto ' + (i + 1) + ' en mm' });
+      ck.addEventListener('change', function () { p.tildado = ck.checked; ic.disabled = !ck.checked; if (!ck.checked) { ic.value = ''; p.calibre = null; } pintar(); });
+      ic.addEventListener('input', function () { var v = numero(ic.value); p.calibre = v == null || isNaN(v) ? (ic.value.trim() ? NaN : null) : v; pintar(); });
+      return h('tr', null,
+        T().td('Validar', h('label', { class: 'cf-tilde' }, ck, p.real ? h('span', { class: 'chip' }, 'clasificada real') : null)),
+        T().td('Dónde', h('div', { class: 'cf-pos' }, h('span', { class: 'mono' }, posPunto(f, p)), h('span', { class: 'rd-peq' }, (p.aislada ? '⚑ lectura aislada · ' : '') + UI.num(p.largo_m, 1) + ' m'))),
+        T().td('Mínimo', [UI.mm(p.min_mm), ' ', UI.chipEstado(estadoDe(p.min_mm, f))], 'num'),
+        T().td('Calibre (opcional)', ic, 'num'));
+    });
+    var cuerpo = !f.vigente ? h('p', { class: 'nota' }, 'Esta medición ya no define el estado del vano (hay una medición o un calibre más nuevos, o ya se descartó).')
+      : f.puntos == null ? UI.mensaje('error', 'No se pudo leer la serie del Geismar de este vano. Recargá la página.')
+      : !f.puntos.length ? h('p', { class: 'nota' }, 'No se encontraron puntos bajos en la serie de este vano.')
+      : [T().tabla([{ t: 'Validar' }, { t: 'Dónde' }, { t: 'Mínimo' }, { t: 'Calibre (opcional)' }], filas, 'cf-puntos'), res];
+    var card = UI.card(f.piquete_desde + ' → ' + f.piquete_hasta, [UI.mm(f.valor), ' ', UI.chipEstado(f.estado), ' · medición del ' + UI.fecha(f.fecha)],
+      h('p', { class: 'rd-peq' }, h('a', { href: Rutas.hacia('vano', UI.viaARuta(f.via || ''), f.piquete_desde) }, 'Ver el gráfico del vano')), cuerpo);
+    if (f.vigente && f.puntos && f.puntos.length) pintar();
+    return card;
+  }
+  async function detalleDescarte(ctx, x) {
+    ctx.titulo('Pedido de descarte N° ' + x.id);
+    var s = ctx.sesion, op = Conexion.puede(s, 'informar'), pend = x.estado === 'pendiente', acep = x.cierre === 'aceptado' && !x.deshecho_en;
+    var r = pend ? await Conexion.rpc('previa_descarte', { p_id: x.id }) : { datos: [] };
+    var ds = await Conexion.leer('v_descarte_lectura', { filtros: [['eq', 'pedido_id', x.id]], orden: ['km_inicio'] });
+    if (!ctx.vigente()) return;
+    if (r.error) return Pantallas.errorBase(ctx, r.error);
+    var filas = pend ? r.datos : [];
+    filas.forEach(function (f) { f.via = x.via; });
+    var fallas = pend && op ? await armarPuntos(filas) : [];
+    if (!ctx.vigente()) return;
+    var vig = filas.filter(function (f) { return f.vigente; });
+    function accion(titulo, texto, ph, rotulo, minimo, llamar, aviso) {
+      var ta = h('textarea', { placeholder: ph, 'aria-label': titulo }), bt = h('button', { class: 'btn sec chico', type: 'button' }, rotulo), m = h('div', { role: 'status' });
+      bt.addEventListener('click', async function () {
+        if (ta.value.trim().length < minimo) { m.replaceChildren(UI.mensaje('error', 'Escribí el motivo (mínimo ' + minimo + ' caracteres).')); return; }
+        bt.disabled = true;
+        var q = await llamar(ta.value.trim());
+        if (q.error) { m.replaceChildren(UI.mensaje('error', errorBase(q.error))); bt.disabled = false; return; }
+        Mo.limpiar(); if (App.contarPendientes) App.contarPendientes(); UI.toast(aviso); App.navegar();
+      });
+      return h('details', { class: 'card cf-anular' }, h('summary', null, titulo), h('p', { class: 'nota' }, texto), h('div', { class: 'rd-form' }, h('label', { class: 'ancho' }, 'Motivo', ta)), h('div', { class: 'acciones' }, bt), m);
+    }
+    // Validación por puntos (operador o administrador, pedido pendiente)
+    var btA = null, mA = h('div', { role: 'status' }), cal = null, tarjetas = [];
+    if (pend && op && vig.length) {
+      var inF = h('input', { type: 'date', id: 'dc-fecha', max: new Date().toISOString().slice(0, 10) }), inV = h('input', { id: 'dc-verifico', placeholder: 'Ej.: guardia de Temperley, J. Gómez' });
+      cal = h('div', { class: 'card', hidden: true }, h('h2', null, 'Calibre'), h('p', { class: 'nota' }, 'Cargaste el calibre de algún punto: falta cuándo y quién midió.'),
+        h('div', { class: 'rd-form' }, h('label', { for: 'dc-fecha' }, 'Fecha', inF), h('label', { for: 'dc-verifico' }, 'Quién midió', inV)));
+      btA = h('button', { class: 'btn', type: 'button' }, 'Aceptar los puntos tildados');
+      var revisar = function () {
+        if (btA.classList.contains('confirmar')) { btA.classList.remove('confirmar'); btA.textContent = 'Aceptar los puntos tildados'; }
+        cal.hidden = !vig.some(function (f) { return (f.puntos || []).some(function (p) { return p.tildado && p.calibre != null; }); });
+      };
+      tarjetas = vig.map(function (f) { return tarjetaVano(f, revisar); });
+      revisar();
+      btA.addEventListener('click', async function () {
+        var vanos = [], err = null;
+        vig.forEach(function (f) {
+          if (err || !f.puntos) return;
+          var tild = f.puntos.filter(function (p) { return p.tildado; });
+          if (!tild.length) return;
+          if (tild.some(function (p) { return p.calibre != null && isNaN(p.calibre); })) { err = 'En ' + f.piquete_desde + ' hay un calibre que no es un número.'; return; }
+          var q = quedaVano(f); if (q.error) { err = f.piquete_desde + ' → ' + f.piquete_hasta + ': ' + q.error; return; }
+          vanos.push({ vano_id: f.vano_id, medicion_id: f.medicion_id, fuera_mm: q.fuera ? q.fuera.mm : null, fuera_km: q.fuera ? q.fuera.km : null,
+            puntos: tild.map(function (p) { return { km_desde: p.km_desde, km_hasta: p.km_hasta, min_mm: p.min_mm, km_min: p.km_min, calibre_mm: p.calibre }; }) });
+        });
+        if (!err && !vanos.length) err = 'Tildá al menos un punto bajo para validar como falsa lectura.';
+        if (!err && !cal.hidden && (!inF.value || inV.value.trim().length < 3)) err = 'Completá la fecha y quién midió con calibre.';
+        if (err) { mA.replaceChildren(UI.mensaje('error', err)); return; }
+        mA.replaceChildren();
+        if (!btA.classList.contains('confirmar')) { btA.classList.add('confirmar'); btA.textContent = 'Tocá de nuevo para aceptar'; return; }
+        btA.disabled = true;
+        var q2 = await Conexion.rpc('validar_descarte', { id: x.id, decision: 'aceptar', motivo: null, datos: { vanos: vanos, calibre: cal.hidden ? null : { fecha: inF.value, verifico: inV.value.trim() } } });
+        if (q2.error) { mA.replaceChildren(UI.mensaje('error', errorBase(q2.error))); btA.disabled = false; btA.classList.remove('confirmar'); btA.textContent = 'Aceptar los puntos tildados'; return; }
+        Mo.limpiar(); if (App.contarPendientes) App.contarPendientes(); UI.toast('Descarte aceptado: ' + UI.plural(q2.datos.lecturas, 'vano', 'vanos') + '. El estado ya cambió.'); App.navegar();
+      });
+    }
+    function tablaSoloVer() {
+      return T().tabla([{ t: 'Vano' }, { t: 'Medición' }, { t: 'Hoy' }], filas.map(function (f) {
+        return h('tr', null, T().td('Vano', h('span', { class: 'mono' }, f.piquete_desde + ' → ' + f.piquete_hasta)), T().td('Medición', UI.fecha(f.fecha)),
+          T().td('Hoy', f.vigente ? [UI.mm(f.valor), ' ', UI.chipEstado(f.estado)] : h('span', { class: 'nota' }, 'ya no define el estado')));
+      }), 'cf-descarte');
+    }
+    var puedeCancelar = pend && (Conexion.puede(s, 'administrar') || (s && s.id === x.pedido_por));
+    var estadoTxt = pend ? h('div', { class: 'rd-aviso ped' }, h('b', null, 'Pendiente de validar. '), 'La alarma sigue hasta que un operador o administrador lo acepte.' + (op ? ' Los puntos bajos vienen tildados: destildá los que no sean falsa lectura. Si se midió con calibre, cargá el valor en el punto.' : ''))
+      : x.deshecho_en ? UI.mensaje('info', 'Aceptado por ' + (x.cerrado_nombre || '—') + ' el ' + UI.fecha(x.cerrado_en) + ' y deshecho por ' + (x.deshecho_nombre || '—') + ' el ' + UI.fecha(x.deshecho_en) + ': «' + (x.motivo_deshacer || '') + '». La alarma volvió.')
+      : x.cierre === 'aceptado' ? UI.mensaje('info', 'Aceptado por ' + (x.cerrado_nombre || '—') + ' el ' + UI.fecha(x.cerrado_en) + '. Una medición nueva del Geismar vuelve a mandar.')
+      : x.cierre === 'rechazado' ? UI.mensaje('info', 'Rechazado por ' + (x.cerrado_nombre || '—') + ' el ' + UI.fecha(x.cerrado_en) + ': «' + (x.motivo_cierre || '') + '». La alarma sigue.')
+      : UI.mensaje('info', 'Cancelado por ' + (x.cerrado_nombre || '—') + ' el ' + UI.fecha(x.cerrado_en) + ': «' + (x.motivo_cierre || '') + '».');
+    ctx.el.replaceChildren(
+      h('div', { class: 'rd-cab' }, h('div', null, h('h1', null, 'Pedido de descarte N° ' + x.id), h('p', { class: 'sub' }, 'Tramo ' + (x.tramo || '?') + ' · ' + UI.nombreVia(x.via) + ' · pedido el ' + UI.fecha(x.pedido_en))),
+        h('div', { class: 'acciones rd-acc' }, h('a', { class: 'btn sec chico', href: '#/campo' }, '← En campo'), Ayuda.boton('descarte', 'Ayuda: validar un descarte'))),
+      estadoTxt,
+      UI.card('Datos', estPedido(x), h('dl', { class: 'datos' },
+        h('dt', null, 'Sector'), h('dd', { class: 'mono' }, x.piquete_desde + ' → ' + x.piquete_hasta),
+        h('dt', null, 'Pidió'), h('dd', null, quienPidio(x) + ' el ' + UI.fecha(x.pedido_en)),
+        x.base ? [h('dt', null, 'Base del sector'), h('dd', null, x.base)] : null,
+        h('dt', null, 'Motivo'), h('dd', { style: 'white-space:pre-wrap' }, x.nota || '—'))),
+      fallas.length ? UI.mensaje('error', 'No se pudo leer la serie del Geismar de ' + fallas.join(', ') + '. Recargá la página y probá de nuevo.') : null,
+      tarjetas.length ? h('div', { class: 'cf-vanos' }, tarjetas) : filas.length ? UI.card('Vanos del pedido', UI.plural(filas.length, 'lectura', 'lecturas'), tablaSoloVer()) : null,
+      cal, btA ? h('div', { class: 'acciones' }, btA) : null, mA,
+      !pend && ds.datos && ds.datos.length ? UI.card('Puntos validados como falsa lectura', UI.plural(ds.datos.length, 'vano', 'vanos'), h('ul', { class: 'lista-vanos' }, ds.datos.map(function (d) {
+        return h('li', null, h('a', { href: Rutas.hacia('vano', UI.viaARuta(d.via), d.piquete_desde) + (Number(String(d.piquete_desde).split('-')[0]) !== Number(d.tramo) ? '?hasta=' + encodeURIComponent(d.piquete_hasta) : '') }, h('span', { class: 'lv-n' }, d.piquete_desde + ' → ' + d.piquete_hasta)),
+          ' · ' + UI.plural(+d.n_puntos || 0, 'punto') + ' de la medición del ' + UI.fecha(d.fecha) + ': de ' + UI.mm(d.valor_antes) + ' a ' + UI.mm(d.valor_mm) + (d.origen === 'calibre' ? ' (calibre del ' + UI.fecha(d.calibre_fecha) + ', ' + (d.calibre_verifico || '') + ')' : ''),
+          d.anulado_en ? h('span', { class: 'chip desc' }, ' deshecho') : null);
+      }))) : null,
+      pend && op ? accion('Rechazar el descarte', 'La alarma sigue. Queda tu nombre, la fecha y el motivo.', 'Ej.: el punto no cae en el tramo neutro; hay que medirlo con calibre.', 'Rechazar', 10, function (t) { return Conexion.rpc('validar_descarte', { id: x.id, decision: 'rechazar', motivo: t }); }, 'Pedido rechazado.') : null,
+      puedeCancelar ? accion('Cancelar el pedido', 'Si se pidió por error o ya no hace falta.', 'Ej.: lo pedí en la vía equivocada.', 'Cancelar el pedido', 5, function (t) { return Conexion.rpc('cancelar_pedido_verificacion', { id: x.id, motivo: t }); }, 'Pedido cancelado.') : null,
+      acep && op ? accion('Deshacer el descarte', 'La alarma vuelve, y las lecturas aisladas vuelven a «dato a confirmar».', 'Ej.: se midió con calibre y el punto bajo es real.', 'Deshacer', 10, function (t) { return Conexion.rpc('deshacer_descarte', { id: x.id, motivo: t }); }, 'Descarte deshecho: la alarma volvió.') : null);
+  }
+
+  // c59: tarjeta de la ficha de un vano en alerta o crítico: qué se puede hacer, según el perfil
+  function rutaAccion(v, que) {
+    var base = Rutas.hacia('vano', UI.viaARuta(v.via), v.piquete_desde) + '/' + que;
+    return Number(String(v.piquete_desde).split('-')[0]) !== Number(v.tramo) ? base + '?hasta=' + encodeURIComponent(v.piquete_hasta) : base;
+  }
+  function tarjetaQueHago(ctx, vn, e) {
+    if (!e || (e.estado !== 'critico' && e.estado !== 'alerta')) return null;
+    var pide = Conexion.puede(ctx.sesion, 'pedir'), info = Conexion.puede(ctx.sesion, 'informar'), desc = Conexion.puede(ctx.sesion, 'descartar');
+    if (!pide && !info) return null;
+    var v = { via: vn.via, piquete_desde: vn.piquete_desde, piquete_hasta: vn.piquete_hasta, tramo: vn.tramo }, cal = e.fuente === 'calibre', btns = [], pasos = [];
+    if (cal) pasos.push(h('li', null, h('b', null, 'Esta alarma sale del calibre. '), 'Se resuelve interviniendo el hilo. Si el calibre está mal cargado, un operador anula esa verificación.'));
+    else {
+      pasos.push(h('li', null, h('b', null, 'Si hay que medirlo: '), info && !pide ? 'cuando llegue la planilla de la guardia, cargá la verificación con calibre. Se cierra sola.' : 'pedí la verificación → la cuadrilla mide con calibre → el operador carga la planilla → se cierra solo.'));
+      pasos.push(h('li', null, h('b', null, 'Si es una falsa lectura '), '(tramo neutro, aislador de sección, aguja, cruce, paso a nivel, transición de sección): pedí descartarla con el motivo → un operador o administrador lo valida → cambia el estado, sin medir con calibre.'));
+    }
+    if (pide) btns.push(h('a', { class: 'btn chico', href: rutaAccion(v, 'pedir') }, 'Pedir verificación'));
+    else if (info) btns.push(h('a', { class: 'btn chico', href: rutaAccion(v, 'verificar') }, 'Informar verificación'));
+    if (desc && !cal) btns.push(h('a', { class: 'btn sec chico', href: rutaAccion(v, 'descartar') }, 'Pedir descartar la alarma'));
+    btns.push(Ayuda.boton('critico', 'Ayuda: cómo resolver un crítico'));
+    return h('section', { class: 'card rd-quehago', 'aria-label': '¿Qué hago con este vano?' }, h('h2', null, '¿Qué hago con este vano?'), h('ol', null, pasos), h('div', { class: 'acciones' }, btns));
+  }
+  // c59: enlaces cortos en las filas de los listados, para un vano en alarma
+  function accionesFila(ctx, v) {
+    if ((v.estado !== 'critico' && v.estado !== 'alerta') || v.fuente === 'calibre') return null;
+    var s = ctx && ctx.sesion, pide = Conexion.puede(s, 'pedir'), desc = Conexion.puede(s, 'descartar');
+    if (!pide && !desc) return null;
+    return h('div', { class: 'rd-peq rd-accfila' }, pide && !v.ped ? h('a', { href: rutaAccion(v, 'pedir') }, 'Pedir verificación') : null, pide && !v.ped && desc && !v.pedDesc ? ' · ' : null, desc && !v.pedDesc ? h('a', { href: rutaAccion(v, 'descartar') }, 'Pedir descarte') : null);
+  }
+
+  // Aviso arriba en la ficha del vano: «en verificación desde …» · c59: más los descartes
   async function avisoPedido(ctx, v) {
-    var r = await Conexion.leer('v_pedido_verificacion', { filtros: [['eq', 'estado', 'pendiente'], ['eq', 'recorrido', v.recorrido], ['eq', 'via', v.via], ['lt', 'km_desde', v.km_fin], ['gt', 'km_hasta', v.km_inicio]], orden: ['pedido_en'] });
+    var a = await Promise.all([avisoVerificacion(ctx, v), avisoDescarte(ctx, v)]);
+    a = a.filter(Boolean);
+    return a.length ? h('div', { class: 'rd-avisos' }, a) : null;
+  }
+  async function avisoDescarte(ctx, v) {
+    var rs = await Promise.all([
+      Conexion.leer('v_descarte_lectura', { filtros: [['eq', 'vano_id', v.id], ['is', 'anulado_en', null]], orden: ['fecha', false] }),
+      Conexion.leer('v_pedido_verificacion', { filtros: [['eq', 'estado', 'pendiente'], ['eq', 'tipo', 'descartar'], ['eq', 'recorrido', v.recorrido], ['eq', 'via', v.via], ['lt', 'km_desde', v.km_fin], ['gt', 'km_hasta', v.km_inicio]], orden: ['pedido_en'] })]);
+    var out = [];
+    if (!rs[1].error && rs[1].datos.length) { var p = rs[1].datos[0];
+      out.push(h('div', { class: 'rd-aviso ped', role: 'status' }, h('b', null, 'Descarte pedido el ' + UI.fecha(p.pedido_en) + '. '), 'Lo pidió ' + quienPidio(p) + ': «' + (p.nota || '') + '». La alarma sigue hasta que se valide. ', h('a', { href: '#/campo/pedido/' + p.id }, Conexion.puede(ctx.sesion, 'informar') ? 'Ver el pedido y validarlo' : 'Ver el pedido')));
+    }
+    if (!rs[0].error && rs[0].datos.length) { var d = rs[0].datos[0];
+      out.push(h('div', { class: 'rd-aviso gris', role: 'status' }, h('b', null, 'Alarma descartada: '), UI.plural(+d.n_puntos || 0, 'punto bajo', 'puntos bajos') + ' de la medición del ' + UI.fecha(d.fecha) + ' (mínimo ' + UI.mm(d.valor_antes) + ', ' + (d.estado_antes === 'critico' ? 'crítico' : 'alerta') + ') se validaron como falsa lectura: el vano queda en ' + UI.mm(d.valor_mm) + (d.origen === 'calibre' ? ', medido con calibre el ' + UI.fecha(d.calibre_fecha) + ' (' + (d.calibre_verifico || '') + ')' : ', lo más bajo del Geismar fuera de esos puntos') + '. Pidió ' + (d.pedido_nombre || '—') + ': «' + (d.nota || '') + '». Aceptó ' + (d.acepto_nombre || '—') + ' el ' + UI.fecha(d.acepto_en) + '. Una medición nueva vuelve a mandar. ', h('a', { href: '#/campo/pedido/' + d.pedido_id }, 'Ver el pedido')));
+    }
+    return out.length ? out : null;
+  }
+  async function avisoVerificacion(ctx, v) {
+    var r = await Conexion.leer('v_pedido_verificacion', { filtros: [['eq', 'estado', 'pendiente'], ['eq', 'tipo', 'verificar'], ['eq', 'recorrido', v.recorrido], ['eq', 'via', v.via], ['lt', 'km_desde', v.km_fin], ['gt', 'km_hasta', v.km_inicio]], orden: ['pedido_en'] });
     if (r.error || !r.datos.length) return null;
     var x = r.datos[0];
     if (x.faltan_ids && x.faltan_ids.indexOf(v.id) < 0)   // este vano ya se midió: el pedido sigue por los otros
@@ -9132,12 +9507,14 @@ if (typeof module !== "undefined") module.exports = { combinadas: combinadas, el
   Rutas.definir('/tramo/:tramo/:via/canton/:canton/intervencion', { pantalla: pIntervencion, titulo: 'Informar intervención', pestana: 'campo', requiere: 'usuario' });
   Rutas.definir('/vano/:via/:piquete/pedir', { pantalla: pPedir, titulo: 'Pedir verificación', pestana: 'campo', requiere: 'usuario' });   // c48
   Rutas.definir('/tramo/:tramo/:via/canton/:canton/pedir', { pantalla: pPedir, titulo: 'Pedir verificación', pestana: 'campo', requiere: 'usuario' });
-  Rutas.definir('/campo/pedido/:id', { pantalla: pDetPed, titulo: 'Pedido de verificación', pestana: 'campo', requiere: 'usuario' });
+  Rutas.definir('/vano/:via/:piquete/descartar', { pantalla: pDescartar, titulo: 'Pedir descartar la alarma', pestana: 'campo', requiere: 'usuario' });   // c59
+  Rutas.definir('/tramo/:tramo/:via/canton/:canton/descartar', { pantalla: pDescartar, titulo: 'Pedir descartar la alarma', pestana: 'campo', requiere: 'usuario' });
+  Rutas.definir('/campo/pedido/:id', { pantalla: pDetPed, titulo: 'Pedido', pestana: 'campo', requiere: 'usuario' });
   Rutas.definir('/campo', { pantalla: pLista, titulo: 'En campo', pestana: 'campo', requiere: 'usuario' });
   Rutas.definir('/campo/verificacion/:id', { pantalla: pDetVer, titulo: 'Verificación', pestana: 'campo', requiere: 'usuario' });
   Rutas.definir('/campo/intervencion/:id', { pantalla: pDetInt, titulo: 'Intervención', pestana: 'campo', requiere: 'usuario' });
 
-  global.PantallaCampo = { botones: botones, bloqueVano: bloqueVano, avisoPedido: avisoPedido, minFuera: minFuera, TIPO_N: TIPO_N };
+  global.PantallaCampo = { botones: botones, bloqueVano: bloqueVano, avisoPedido: avisoPedido, tarjetaQueHago: tarjetaQueHago, accionesFila: accionesFila, rutaAccion: rutaAccion, minFuera: minFuera, TIPO_N: TIPO_N };
 })(window);
 
 
@@ -9624,7 +10001,7 @@ if (typeof module !== "undefined") module.exports = { combinadas: combinadas, el
 
   var TABLA = {
     medicion: 'Mediciones', archivo_fuente: 'Excel registrados', anomalia: 'Revisión', verificacion: 'Calibre',
-    evento_hilo: 'Intervenciones', pedido_verificacion: 'Pedidos de verificación', perfil: 'Usuarios', umbral: 'Umbrales',
+    evento_hilo: 'Intervenciones', pedido_verificacion: 'Pedidos', descarte_lectura: 'Alarmas descartadas', perfil: 'Usuarios', umbral: 'Umbrales',
     version_piquetes: 'Planilla', limite_tramo: 'Límites de tramos', cambio_seccion: 'Cambio de sección',
     zona_sin_lectura: 'Zonas sin lectura', aviso: 'Avisos'
   };
@@ -9632,7 +10009,7 @@ if (typeof module !== "undefined") module.exports = { combinadas: combinadas, el
     { k: '', t: 'Todo' },
     { k: 'mediciones', t: 'Mediciones y Excel', tablas: ['medicion', 'archivo_fuente'] },
     { k: 'revision', t: 'Revisión de lecturas', tablas: ['anomalia'] },
-    { k: 'campo', t: 'En campo (calibre, intervenciones, pedidos)', tablas: ['verificacion', 'evento_hilo', 'pedido_verificacion'] },
+    { k: 'campo', t: 'En campo (calibre, intervenciones, pedidos)', tablas: ['verificacion', 'evento_hilo', 'pedido_verificacion', 'descarte_lectura'] },
     { k: 'usuarios', t: 'Usuarios', tablas: ['perfil'] },
     { k: 'config', t: 'Configuración (umbrales, planilla, límites, zonas, avisos)', tablas: ['umbral', 'version_piquetes', 'limite_tramo', 'cambio_seccion', 'zona_sin_lectura', 'aviso'] }
   ];
@@ -9860,6 +10237,19 @@ if (typeof module !== "undefined") module.exports = { combinadas: combinadas, el
       if (cambio('visto_en') && r.visto_en) return 'Marcó como vista ' + ev + '.';
       return (op === 'DELETE' ? 'Borró ' : 'Modificó ') + ev + (op === 'DELETE' ? '.' : ': ' + campos.join(', ') + '.');
     }
+    if (t === 'descarte_lectura') {   // c59
+      if (op === 'INSERT') return 'Se descartó una alarma de ' + r.valor_antes + ' mm (pedido N° ' + r.pedido_id + ').';
+      if (cambio('anulado_en')) return 'Se deshizo un descarte de alarma (pedido N° ' + r.pedido_id + '). Motivo: «' + (r.motivo_anulacion || '') + '».';
+      return 'Modificó un descarte de alarma: ' + campos.join(', ') + '.';
+    }
+    if (t === 'pedido_verificacion' && r.tipo === 'descartar') {   // c59
+      var pdz = 'el pedido de descarte' + id + lugar(r);
+      if (op === 'INSERT') return 'Pidió descartar una alarma' + lugar(r) + ' (pedido' + id + '): «' + (r.nota || '') + '».';
+      if (cambio('deshecho_en')) return 'Deshizo ' + pdz + '. Motivo: «' + (r.motivo_deshacer || '') + '».';
+      if (cambio('estado') && r.cierre === 'aceptado') return 'Aceptó ' + pdz + '.';
+      if (cambio('estado') && r.cierre === 'rechazado') return 'Rechazó ' + pdz + '. Motivo: «' + (r.motivo_cierre || '') + '».';
+      if (cambio('estado') && r.estado === 'cancelado') return 'Canceló ' + pdz + '. Motivo: «' + (r.motivo_cierre || '') + '».';
+    }
     if (t === 'pedido_verificacion') {
       var pe = 'el pedido de verificación' + id + lugar(r);
       if (op === 'INSERT') return 'Pidió verificar en campo' + lugar(r) + ' (pedido' + id + ')' + (r.nota ? ': «' + r.nota + '»' : '') + '.';
@@ -10036,7 +10426,7 @@ if (typeof module !== "undefined") module.exports = { combinadas: combinadas, el
  * ===================================================================== */
 (function (global) {
   'use strict';
-  var VERSION = { id: 'V1.003', tarea: 'c58', fecha: '29/10/2026', publicado: '2026-10-29T21:30' };
+  var VERSION = { id: 'V1.004', tarea: 'c59', fecha: '15/11/2026', publicado: '2026-11-15T08:00' };
   global.APP_VERSION = VERSION;
 
   var CADA_MS = 30 * 60 * 1000;
@@ -10171,7 +10561,7 @@ if (typeof module !== "undefined") module.exports = { combinadas: combinadas, el
   }
   function textoCampo() {
     var d = estado.campoDet || {}, t = [];
-    if (d.pedidos) t.push(UI.plural(d.pedidos, 'pedido de verificación pendiente', 'pedidos de verificación pendientes'));
+    if (d.pedidos) t.push(UI.plural(d.pedidos, 'pedido pendiente (verificar o descartar)', 'pedidos pendientes (verificar o descartar)'));
     if (d.sinVer) t.push(d.sinVer + ' sin ver por un administrador');
     return t.join(' · ');
   }
