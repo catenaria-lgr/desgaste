@@ -1932,6 +1932,9 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
         .then(function (x) { return x.error ? { datos: [], error: null, faltaPedidos: true } : x; }),
       // c59: alarmas descartadas vigentes (script 19). Sin el 19 se sigue sin ellas.
       Conexion.leerTodo('v_descarte_lectura', { columnas: 'id, pedido_id, vano_id, fecha, valor_antes, estado_antes, nota', filtros: [['is', 'anulado_en', null]] })
+        .then(function (x) { return x.error ? { datos: [], error: null } : x; }),
+      // c18: avisos de operador vigentes (sin vencimiento o que vencen hoy o después), para Tramo, Entre estaciones, Cantón e Informe
+      Conexion.leerTodo('aviso', { columnas: 'id, recorrido, via, km_desde, km_hasta, texto, vence, creado_en', filtros: [['or', 'vence.is.null,vence.gte.' + UI.hoyISO()]] })
         .then(function (x) { return x.error ? { datos: [], error: null } : x; })
     ]);
     var err = rs.map(function (r) { return r.error; }).filter(Boolean)[0];
@@ -1997,6 +2000,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       if (p.tipo === 'descartar') { if (!v.pedDesc && v.ki < p.b - 0.0005 && v.kf > p.a + 0.0005 && (v.estado === 'critico' || v.estado === 'alerta')) v.pedDesc = p; return; }   // c59: la alarma sigue
       if (!v.ped && v.ki < p.b - 0.0005 && v.kf > p.a + 0.0005 && (!p.faltan_ids || p.faltan_ids.indexOf(v.vano_id) >= 0)) v.ped = p; }); });
     rs[9].datos.forEach(function (d) { var v = M.VID[d.vano_id]; if (v && (!v.desc || d.fecha > v.desc.fecha)) v.desc = d; });   // c59
+    M.AVI = rs[10].datos.map(function (x) { return Object.assign({}, x, { a: +x.km_desde, b: +x.km_hasta }); });   // c18
     return { error: null, M: M };
   }
 
@@ -2150,10 +2154,16 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
   function seccionesEn(M, rec, via, a, b) { return ((M.CSEC || {})[rec + '|' + via] || []).filter(function (p) { return (p.b != null ? p.b : p.km) >= a - 1e-6 && (p.a != null ? p.a : p.km) <= b + 1e-6; }); }
   // c39: límites del tramo t en una hoja y vía (o null si el script 11 no está)
   function limiteDe(M, rec, via, t) { return ((M.LIM || {})[rec + '|' + via] || []).filter(function (l) { return l.tramo === t; })[0] || null; }
+  // c18: avisos de operador vigentes que tocan alguno de los vanos (misma hoja; vía del vano o «todas»), por km
+  function avisosEn(M, vs) {
+    return (M.AVI || []).filter(function (x) {
+      return vs.some(function (v) { return x.recorrido === v.recorrido && (!x.via || x.via === v.via) && x.a < v.kf - 0.0005 && x.b > v.ki + 0.0005; });
+    }).sort(function (x, y) { return x.a - y.a; });
+  }
   function calibreEn(M, rec, via, a, b) { return (M.CAL[rec + '|' + via] || []).filter(function (p) { return p.km >= a - 1e-6 && p.km <= b + 1e-6; }); }
 
   global.Modelo = {
-    cargar: cargar, calibreEn: calibreEn, limiteDe: limiteDe, neutrosEn: neutrosEn, transicionesEn: transicionesEn, seccionesEn: seccionesEn, filtrarEstado: filtrarEstado, limpiar: limpiar, parciales: parciales, minEnVano: minEnVano, nivel: nivel,
+    cargar: cargar, calibreEn: calibreEn, avisosEn: avisosEn, limiteDe: limiteDe, neutrosEn: neutrosEn, transicionesEn: transicionesEn, seccionesEn: seccionesEn, filtrarEstado: filtrarEstado, limpiar: limpiar, parciales: parciales, minEnVano: minEnVano, nivel: nivel,
     viasTramo: viasTramo, vanosTV: vanosTV, segmentos: segmentos, segDeVano: segDeVano, nombreSeg: nombreSeg, cantonesDe: cantonesDe,
     vanosCanton: vanosCanton, segsDeVanos: segsDeVanos, resumen: resumen, secDe: secDe, secTxt: secTxt, medsZona: medsZona, estacionesEn: estacionesEn,
     rutaTramo: rutaTramo, rutaSeg: rutaSeg, rutaCanton: rutaCanton, rutaCantonDeVano: rutaCantonDeVano,
@@ -4425,6 +4435,13 @@ if (typeof module !== "undefined") module.exports = { combinadas: combinadas, el
   function boton(href, texto, pri, inactivo) { return h('a', { class: 'btn chico ' + (pri ? '' : 'sec'), href: inactivo ? null : href, 'aria-disabled': inactivo ? 'true' : null }, texto); }
   function avisoParciales(M) { return M.errorParciales ? UI.mensaje('error', M.errorParciales) : null; }
 
+  // c18: avisos que cargan los operadores (Trabajo → Avisos y zonas sin lectura): nota sobre un sector hasta que vence.
+  function avisosOperador(M, vs) {
+    return (Mo.avisosEn ? Mo.avisosEn(M, vs) : []).map(function (x) {
+      return h('div', { class: 'rd-aviso' }, h('b', null, 'Aviso: '), x.texto,
+        h('span', { class: 'rd-peq' }, ' (' + km(x.a) + ' – ' + nf(x.b, 3) + (x.via ? '' : ', todas las vías') + (x.vence ? '; hasta el ' + UI.fecha(x.vence) : '') + ')'));
+    });
+  }
   function avisosVanos(M, vs, ctxNivel) {
     var out = [], zonas = {};
     vs.forEach(function (v) { if (v.zona_sin_lectura_id) (zonas[v.zona_sin_lectura_id] = zonas[v.zona_sin_lectura_id] || []).push(v); });
@@ -4433,6 +4450,7 @@ if (typeof module !== "undefined") module.exports = { combinadas: combinadas, el
       out.push(h('div', { class: 'rd-aviso rojo' }, h('b', null, 'Zona sin medición desde ' + UI.fecha(z && z.vigente_desde) + ' '),
         '(' + (z ? km(z.km_desde) + ' – ' + nf(z.km_hasta, 3) + ', ' : '') + UI.plural(l.length, 'vano') + ' de esta zona). ' + (z ? z.motivo : '')));
     });
+    out = out.concat(avisosOperador(M, vs));   // c18
     var parc = vs.filter(function (v) { return v.parcial && v.parcial.est && v.parcial.est !== 'normal'; }).sort(function (a, b) { return a.parcial.val - b.parcial.val; });
     if (parc.length && ctxNivel !== 'consulta') {
       var bajo = parc.filter(function (v) { return v.parcial.est === 'critico'; }).length, alr = parc.length - bajo;
@@ -4852,6 +4870,7 @@ if (typeof module !== "undefined") module.exports = { combinadas: combinadas, el
   function avisosVanoInf(M, v) {
     var out = [];
     if (v.zona_sin_lectura_id) { var z = M.ZON[v.zona_sin_lectura_id]; out.push(h('div', { class: 'rd-aviso rojo' }, h('b', null, 'Zona sin medición desde ' + UI.fecha(z && z.vigente_desde) + '. '), 'Estado del hilo no verificado: corresponde inspección de la guardia e informe.')); }
+    out = out.concat(avisosOperador(M, [v]));   // c18
     if (v.parcial && v.parcial.est && v.parcial.est !== 'normal') out.push(h('div', { class: 'rd-aviso' + (v.parcial.est === 'critico' ? ' rojo' : '') }, h('b', null, 'Medido solo en parte, ' + (v.parcial.est === 'critico' ? 'bajo el límite' : 'en alerta') + ': '),
       'mínimo ' + mm(v.parcial.val) + ' mm en ' + km(v.parcial.km) + ' el ' + UI.fecha(v.parcial.fecha) + ' (la pasada cubrió el ' + nf(v.parcial.cobertura * 100, 0) + ' % del vano). No cambia el estado: verificar en campo.'));
     if (v.revisar) out.push(h('div', { class: 'rd-aviso' }, h('b', null, 'Dato a confirmar: '), 'una sola lectura dio un valor bajo y todavía nadie confirmó si es real (desgaste) o un error del equipo. Mientras tanto vale como está.'));
@@ -8204,6 +8223,12 @@ if (typeof module !== "undefined") module.exports = { combinadas: combinadas, el
         'Anular: botón en el detalle, con motivo obligatorio. No se deshace desde la plataforma.',
         'Si un informe se reprocesó, cargá el informe nuevo en Carga de medición: la plataforma ofrece reemplazar la publicada sin perder las clasificaciones (ver «¿Cómo cargo una medición nueva?»).'],
         ir: ['#/mediciones', 'Ir a Mediciones'] },
+      { id: 'avisos', para: 'operador', q: '¿Cómo cargo un aviso o una zona sin lectura?', pasos: [
+        'Trabajo → Avisos y zonas sin lectura. Elegí la pestaña, tocá «Cargar…», el tramo y la vía (o «todas las vías del tramo»), y el sector de piquete + m a piquete + m.',
+        'Antes de guardar mirá qué vanos toca. Aviso: el texto. Zona: motivo (paso a nivel, tierra en la vía, aparatos de vía…) y desde cuándo no se mide ahí. Ninguno lleva fecha de fin.',
+        'Los dos se ven al instante en Tramo, Cantón, Ficha e Informe. No cambian el estado ni cierran el ⚑: la zona solo deja asentado que ahí el Geismar no mide.',
+        'Cuando ya no hace falta, «Terminar» con el motivo (por ejemplo, terminó la obra o se renovó la vía): deja de verse en ese momento y queda en la lista de terminados como historia.'],
+        ir: ['#/avisos', 'Ir a Avisos y zonas'] },
       { id: 'usuarios', para: 'admin', q: '¿Cómo doy de alta o de baja a un usuario?', pasos: [
         'Administración → Usuarios → Agregar usuario: mail institucional, nombre, perfil (y cargo si es Gestión). El cargo es solo un dato: todo el perfil Gestión puede pedir verificación o descarte.',
         'No hace falta mandar la contraseña provisoria que muestra la plataforma: el usuario entra con «Olvidé mi contraseña» y su mail institucional, y elige la suya con el código que le llega.',
@@ -8490,7 +8515,7 @@ if (typeof module !== "undefined") module.exports = { combinadas: combinadas, el
 <script>/* js/pantallas/trabajo.js */
 /* =====================================================================
  * Trabajo (operador) y Administración (admin) — marcadores (tarea c14)
- *   #/trabajo  hub: P10 Carga (c06) · P11 Revisión (c04) · P12 Avisos y zonas (c18)
+ *   #/trabajo  hub: P10 Carga (c06) · P11 Revisión (c04) · P12 Avisos y zonas (c18, avisos.js)
  *   #/admin    hub: P13 Usuarios · P14 Umbrales · P15 Planilla (c11, c17) · P16 Auditoría (c11) · Uso (c64)
  * Las rutas exigen sesión; sin sesión llevan a Ingresar y vuelven acá.
  * c04 (10/10/2026): Revisión ya existe (revision.js): acá solo queda su tarjeta, con el contador.
@@ -8504,7 +8529,7 @@ if (typeof module !== "undefined") module.exports = { combinadas: combinadas, el
   var TRABAJO = [
     { ruta: 'carga', titulo: 'Carga de medición', tarea: 'c06', texto: 'Informe de desgaste procesado (Excel) → revisar qué se carga → publicar.', hecha: true },   // c06: carga.js
     { ruta: 'revision', titulo: 'Revisión', tarea: 'c04', texto: 'Lecturas aisladas (real / dato erróneo) · posibles reemplazos · sección distinta.', pendientes: true, hecha: true },
-    { ruta: 'avisos', titulo: 'Avisos y zonas sin lectura', tarea: 'c18', texto: 'Alta y vencimiento de avisos; zonas fijas donde el Geismar no lee.' }
+    { ruta: 'avisos', titulo: 'Avisos y zonas sin lectura', tarea: 'c18', texto: 'Notas sobre un sector hasta que vencen y zonas donde el Geismar no mide (con su vigencia).', hecha: true }   // c18: avisos.js
   ];
   var ADMIN = [
     { ruta: 'admin/usuarios', titulo: 'Usuarios', tarea: 'c11', texto: 'Alta, perfil, base, baja y reinicio de contraseña de quienes usan la plataforma.', hecha: true },
@@ -10589,6 +10614,412 @@ if (typeof module !== "undefined") module.exports = { combinadas: combinadas, el
   Rutas.definir('/admin/uso', { pantalla: pantalla, titulo: 'Uso de la plataforma', pestana: 'admin', requiere: 'admin' });
 })();
 </script>
+<script>/* js/pantallas/avisos.js */
+/* =====================================================================
+ * P12 Avisos y zonas sin lectura (tarea c18, 16/11/2026) — Trabajo, operadores y administradores
+ *   #/avisos[?tramo=<n>]            pestaña Avisos
+ *   #/avisos?ver=zonas[&tramo=<n>]  pestaña Zonas sin lectura
+ *
+ * Aviso (decisión de Sebastián, 16/11/2026): nota sobre un sector, con texto y vencimiento opcional, que todos ven
+ *   en Tramo, Entre estaciones, Cantón, Ficha e Informe mientras está vigente. No cambia el estado.
+ *   Sin fecha de fin (Sebastián, 16/11/2026): dura hasta que alguien toca «Terminar», con motivo (vence = ayer + nota en el texto).
+ *   Se corrige el texto. Borra solo un administrador.
+ * Zona sin lectura (relevamiento §9.5): donde el Geismar no mide. NO cambia el estado ni borra el ⚑: la plataforma
+ *   deja asentado que ahí no se midió. Sin fecha de fin: se termina con motivo (vigente_hasta = ayer); queda como historia.
+ *   Borrar: solo un administrador, para una zona cargada por error.
+ * Sin script de la base: tablas aviso y zona_sin_lectura (scripts 01, 02 y 13). Alta y cambios: operador y administrador;
+ *   borrar: administrador (lo decide la base, RLS). Todo queda en la auditoría.
+ * El sector se elige por piquete + m de la planilla vigente y se guarda en km (como la verificación de c29).
+ *   Con una planilla nueva los km se mantienen y los piquetes que se muestran se recalculan.
+ * La inspección de la guardia SIN calibre no está acá (necesita el script 23; otra tarea).
+ * Todo se arma con UI.h() (texto, nunca HTML con datos de la base).
+ * ===================================================================== */
+(function (global) {
+  'use strict';
+  var h = UI.h, Mo = global.Modelo;
+  function T() { return global.PantallaTramo; }
+  var TOL = 0.0005;   // 0,5 m
+  var MOTIVOS = ['Paso a nivel: el Geismar pierde la referencia', 'Tierra en la vía: el equipo no lee el hilo', 'Aparatos de vía (cambios): el equipo no lee el hilo', 'Otro: '];
+  var TEXTO_MIN = 5, MOTIVO_MIN = 10, NOTA_MIN = 10;
+
+  function num(t) { var x = String(t == null ? '' : t).trim().replace(/\s/g, '').replace(',', '.'); return x === '' ? 0 : (/^\d+(\.\d+)?$/.test(x) ? Number(x) : NaN); }
+  function sumarDias(iso, n) { var p = iso.split('-'), d = new Date(Date.UTC(+p[0], +p[1] - 1, +p[2] + n)); return d.toISOString().slice(0, 10); }
+  function diasEntre(a, b) { var p = a.split('-'), q = b.split('-'); return Math.round((Date.UTC(+q[0], +q[1] - 1, +q[2]) - Date.UTC(+p[0], +p[1] - 1, +p[2])) / 864e5); }
+  function fechaLocal(ts) { var d = new Date(ts); return d.getFullYear() + '-' + ('0' + (d.getMonth() + 1)).slice(-2) + '-' + ('0' + d.getDate()).slice(-2); }
+  function hace(iso, hoy) { var d = diasEntre(iso, hoy); return d <= 0 ? 'hoy' : d === 1 ? 'ayer' : 'hace ' + d + ' días'; }
+  function poner(el, hijos) { el.replaceChildren(); [].concat(hijos).forEach(function add(c) { if (Array.isArray(c)) c.forEach(add); else if (c) el.appendChild(c); }); }
+  function errorBase(x) { return String(x || '').replace(/^.*?ERROR:\s*/, ''); }
+
+  // ------------------------------------------------------------------
+  // Ubicación en la planilla vigente (vanos del modelo de la red, también los de cuadro)
+  // ------------------------------------------------------------------
+  function viasDe(M, rec) {
+    return Object.keys(M.RV).filter(function (k) { return k.indexOf(rec + '|') === 0; }).map(function (k) { return k.slice(rec.length + 1); })
+      .sort(function (a, b) { return Mo.ORD_VIA.indexOf(a) - Mo.ORD_VIA.indexOf(b); });
+  }
+  function tocados(M, rec, via, a, b) {
+    var out = [];
+    (via ? [via] : viasDe(M, rec)).forEach(function (vi) {
+      (M.RV[rec + '|' + vi] || []).forEach(function (v) { if (v.ki < b - TOL && v.kf > a + TOL) out.push(v); });
+    });
+    return out;
+  }
+  function ubicar(M, rec, via, k) {   // km → piquete + m
+    var vs = M.RV[rec + '|' + via] || [];
+    for (var i = 0; i < vs.length; i++) if (k >= vs[i].ki - 1e-6 && k < vs[i].kf - 1e-6) return { cod: vs[i].piquete_desde, m: (k - vs[i].ki) * 1000 };
+    var u = vs[vs.length - 1];
+    if (u && Math.abs(k - u.kf) < TOL) return { cod: u.piquete_hasta, m: 0 };
+    return null;
+  }
+  function pqTxt(p) { return p ? p.cod + (p.m >= 0.05 ? ' + ' + UI.num(p.m, 1) + ' m' : '') : null; }
+  function sectorTxt(M, x) {   // por vía: «19-50-3 + 12 m → 19-50-9»
+    var vias = x.via ? [x.via] : viasDe(M, x.recorrido);
+    return vias.map(function (vi) {
+      var a = ubicar(M, x.recorrido, vi, +x.km_desde), b = ubicar(M, x.recorrido, vi, +x.km_hasta);
+      return { via: vi, t: a && b ? pqTxt(a) + ' → ' + pqTxt(b) : 'fuera de los piquetes de la planilla vigente', a: pqTxt(a), b: pqTxt(b) };
+    });
+  }
+  function tramosDe(vs) { var t = {}; vs.forEach(function (v) { t[v.tramo] = 1; }); return Object.keys(t).map(Number).sort(function (a, b) { return a - b; }); }
+  function viaTxt(x) { return x.via ? UI.nombreVia(x.via) : 'Todas las vías'; }
+
+  // ------------------------------------------------------------------
+  // Datos
+  // ------------------------------------------------------------------
+  async function leerDatos(ctx) {
+    var ref = await ctx.ref();
+    if (ref.error) return { error: ref.error };
+    if (!ref.versionVigente) return { sinPlanilla: true };
+    var rs = await Promise.all([Mo.cargar(ref), Conexion.leerTodo('aviso', {}), Conexion.leerTodo('zona_sin_lectura', {})]);
+    var err = rs[0].error || rs[1].error || rs[2].error;
+    if (err) return { error: err };
+    var M = rs[0].M, ids = {};
+    rs[1].datos.forEach(function (x) { if (x.autor) ids[x.autor] = 1; });
+    rs[2].datos.forEach(function (x) { if (x.cargado_por) ids[x.cargado_por] = 1; });
+    var nombres = {}, ks = Object.keys(ids);
+    var ns = await Promise.all(ks.map(function (u) { return Conexion.rpc('nombre_firmante', { u: u }); }));
+    ks.forEach(function (u, i) { nombres[u] = ns[i].datos || null; });
+    function prep(x) { x.vs = tocados(M, x.recorrido, x.via, +x.km_desde, +x.km_hasta); x.tramos = tramosDe(x.vs); x.princ = x.vs.filter(function (v) { return !v.fuera; }).length; return x; }
+    return { ref: ref, M: M, avisos: rs[1].datos.map(prep), zonas: rs[2].datos.map(prep), nombres: nombres };
+  }
+
+  // ------------------------------------------------------------------
+  // Pantalla
+  // ------------------------------------------------------------------
+  async function pantalla(ctx) {
+    var ver = ctx.query.ver === 'zonas' ? 'zonas' : 'avisos', tF = ctx.query.tramo ? Number(ctx.query.tramo) : null;
+    var titulo = 'Avisos y zonas sin lectura';
+    ctx.miga([{ texto: 'Trabajo', ruta: '#/trabajo' }, { texto: titulo }]);
+    if (!Conexion.puede(ctx.sesion, 'cargar')) return Pantallas.sinPermiso(ctx);
+    ctx.el.replaceChildren(UI.encabezado(titulo), h('div', { class: 'cargando' }, 'Leyendo avisos, zonas y planilla…'));
+    var D = await leerDatos(ctx);
+    if (!ctx.vigente()) return;
+    if (D.sinPlanilla) { ctx.el.replaceChildren(Pantallas.sinPlanilla()); return; }
+    if (D.error) { Pantallas.errorBase(ctx, D.error); return; }
+    var adm = ctx.sesion && ctx.sesion.rol === 'admin', hoy = UI.hoyISO();
+    var zonaEdicion = h('div');
+
+    async function recargar(texto) {
+      if (T() && T().limpiarCache) T().limpiarCache(); else Mo.limpiar();
+      if (texto) UI.toast(texto);
+      await pantalla(ctx);
+    }
+    async function guardar(op) {   // op = promesa de supabase-js con .select('id')
+      var r = await op;
+      if (r.error) return errorBase(Conexion.traducirError ? Conexion.traducirError(r.error) : r.error.message);
+      if (!r.data || !r.data.length) return 'La base no dejó guardar el cambio (permiso). Si sos operador o administrador y sigue pasando, avisá.';
+      return null;
+    }
+
+    function ruta(v, t) { var q = []; if (v === 'zonas') q.push('ver=zonas'); if (t) q.push('tramo=' + t); return '#/avisos' + (q.length ? '?' + q.join('&') : ''); }
+    var lista = ver === 'zonas' ? D.zonas : D.avisos;
+    var tramosCon = {}; lista.forEach(function (x) { x.tramos.forEach(function (t) { tramosCon[t] = 1; }); });
+    var filtrada = tF ? lista.filter(function (x) { return x.tramos.indexOf(tF) >= 0; }) : lista;
+    var nVig = function (L, z) { return L.filter(z ? vigenteZo : vigenteAv).length; };
+
+    var pest = h('div', { class: 'vias pestanas' },
+      h('a', { href: ruta('avisos', tF), class: ver === 'avisos' ? 'on' : null, 'aria-current': ver === 'avisos' ? 'page' : null }, 'Avisos (' + nVig(D.avisos) + ' vigentes)'),
+      h('a', { href: ruta('zonas', tF), class: ver === 'zonas' ? 'on' : null, 'aria-current': ver === 'zonas' ? 'page' : null }, 'Zonas sin lectura (' + nVig(D.zonas, true) + ' vigentes)'));
+    var selT = h('select', { id: 'av-ftramo', 'aria-label': 'Filtrar por tramo' }, h('option', { value: '' }, 'Todos los tramos'),
+      Object.keys(tramosCon).map(Number).sort(function (a, b) { return a - b; }).map(function (t) { return h('option', { value: t, selected: t === tF }, 'Tramo ' + t); }));
+    selT.addEventListener('change', function () { location.hash = ruta(ver, selT.value || null); });
+    var btNuevo = h('button', { class: 'btn', type: 'button', id: 'av-nuevo' }, ver === 'zonas' ? 'Cargar una zona sin lectura' : 'Cargar un aviso');
+    var zonaForm = h('div');
+    btNuevo.addEventListener('click', function () { zonaEdicion.replaceChildren(); zonaForm.replaceChildren(formAlta(ver)); btNuevo.hidden = true; zonaForm.scrollIntoView({ block: 'start' }); });
+
+    var sub = ver === 'zonas'
+      ? 'Sectores donde el Geismar no mide. No cambian el estado ni cierran el ⚑: dejan asentado que ahí no se midió y que corresponde inspección de la guardia.'
+      : 'Notas sobre un sector que todos ven en Tramo, Cantón, Ficha e Informe hasta que alguien las termina. No cambian el estado.';
+    ctx.el.replaceChildren(UI.encabezado(titulo, sub), pest,
+      UI.card(null, null, h('div', { class: 'filtros' }, h('label', null, h('small', null, 'Tramo'), selT), h('div', { class: 'acciones' }, btNuevo))),
+      zonaForm, zonaEdicion,
+      h('div', null, ver === 'zonas' ? listaZonas(filtrada) : listaAvisos(filtrada)));
+
+    // ---------------- Listas ----------------
+    function cargo(uid, ts) {
+      var f = fechaLocal(ts);
+      return [h('div', null, D.nombres[uid] || '—'), h('div', { class: 'rd-peq' }, UI.fecha(f) + ' (' + hace(f, hoy) + ')')];
+    }
+    function sectorCelda(x) {
+      return [x.tramos.length ? 'Tramo ' + x.tramos.join(', ') : x.recorrido, h('div', { class: 'rd-peq' }, viaTxt(x))];
+    }
+    function pqCelda(x) {
+      var s = sectorTxt(D.M, x);
+      return [s.map(function (q) {
+        return h('div', { class: 'mono', style: 'margin-bottom:2px' }, s.length > 1 ? h('b', null, q.via + ' ') : null,
+          q.a && q.b ? [h('span', { style: 'white-space:nowrap' }, q.a), ' ', h('span', { style: 'white-space:nowrap' }, '→ ' + q.b)] : q.t);
+      }),
+        h('div', { class: 'rd-peq' }, UI.km(x.km_desde) + ' – ' + UI.num(x.km_hasta, 3) + ' (' + UI.num((x.km_hasta - x.km_desde) * 1000, 0) + ' m)')];
+    }
+    function verVanos(x) {
+      var v = x.vs.filter(function (q) { return !q.fuera; })[0] || x.vs[0];
+      return v ? h('a', { href: T().rutaVano(v) }, 'Ver en la ficha') : null;
+    }
+    function tabla(cols, filas) { return T().tabla(cols.map(function (t) { return { t: t }; }), filas); }
+    function td(l, c, cl) { return T().td(l, c, cl); }
+
+    // Vigente / terminado (c18, Sebastián 16/11/2026: sin fecha de fin; dura hasta que alguien toca «Terminar», con motivo).
+    // En la base, «Terminar» guarda vence (aviso) o vigente_hasta (zona) = ayer, para que deje de verse en el momento,
+    // y suma al texto «· Terminado el dd-mm-aaaa: motivo». En pantalla se muestra el día en que se terminó (= esa fecha + 1).
+    function vigenteAv(x) { return !x.vence || x.vence >= hoy; }
+    function vigenteZo(x) { return !x.vigente_hasta || x.vigente_hasta >= hoy; }
+    function botonBorrar(x, esZona) {
+      return h('button', { class: 'btn chico sec', type: 'button', onclick: async function (ev) {
+        if (!global.confirm(esZona ? '¿Borrar esta zona? Usalo solo si se cargó por error: si existió y ya no corresponde, terminala. Queda registrado en la auditoría.'
+          : '¿Borrar el aviso «' + x.texto.slice(0, 60) + '»? Queda registrado en la auditoría. Para sacarlo de las pantallas alcanza con «Terminar».')) return;
+        ev.target.disabled = true;
+        var e = await guardar(Conexion.cliente.from(esZona ? 'zona_sin_lectura' : 'aviso').delete().eq('id', x.id).select('id'));
+        if (e) { ev.target.disabled = false; UI.toast(e); return; }
+        recargar(esZona ? 'Zona borrada.' : 'Aviso borrado.');
+      } }, 'Borrar');
+    }
+    function acciones(x, esZona, vigente) {
+      var acc = [];
+      if (vigente) {
+        acc.push(h('button', { class: 'btn chico sec', type: 'button', onclick: function () { esZona ? editarZona(x) : editarAviso(x); } }, 'Editar'));
+        acc.push(h('button', { class: 'btn chico sec', type: 'button', onclick: function () { terminar(x, esZona); } }, 'Terminar'));
+      }
+      if (adm) acc.push(botonBorrar(x, esZona));
+      return acc.length ? h('div', { class: 'acciones' }, acc) : null;
+    }
+
+    function listaAvisos(L) {
+      var vig = L.filter(vigenteAv).sort(function (a, b) { return String(b.creado_en).localeCompare(String(a.creado_en)); });
+      var ter = L.filter(function (x) { return !vigenteAv(x); }).sort(function (a, b) { return b.vence.localeCompare(a.vence); });
+      function fila(x, vigente) {
+        var dias = diasEntre(fechaLocal(x.creado_en), hoy);
+        var extra = vigente ? (x.vence ? h('div', { class: 'rd-peq' }, 'Hasta el ' + UI.fecha(x.vence) + ' (cargado con fecha de fin)') :
+          dias > 90 ? h('div', null, h('span', { class: 'chip rd-warn' }, 'vigente hace más de 3 meses: ¿sigue haciendo falta?')) : null) : null;
+        return h('tr', null, td('Dónde', sectorCelda(x)), td('Piquetes', [pqCelda(x), verVanos(x)]), td('Aviso', [x.texto, extra]),
+          td('Cargó', cargo(x.autor, x.creado_en)),
+          vigente ? null : td('Terminado el', UI.fecha(sumarDias(x.vence, 1))),
+          td('', acciones(x, false, vigente)));
+      }
+      return [UI.card('Vigentes', UI.plural(vig.length, 'aviso'), vig.length ? tabla(['Dónde', 'Piquetes', 'Aviso', 'Cargó', ''], vig.map(function (x) { return fila(x, true); }))
+          : h('p', { class: 'rd-vacio' }, tF ? 'Ningún aviso vigente en el tramo ' + tF + '.' : 'Ningún aviso vigente.'),
+          h('p', { class: 'nota' }, 'Un aviso se ve en Tramo, Cantón, Ficha e Informe hasta que alguien lo termina (con el motivo). No cambia el estado.')),
+        ter.length ? UI.card(null, null, h('details', { id: 'av-terminados' }, h('summary', null, 'Terminados (' + ter.length + ')'),
+          tabla(['Dónde', 'Piquetes', 'Aviso', 'Cargó', 'Terminado el', ''], ter.map(function (x) { return fila(x, false); })))) : null];
+    }
+
+    function listaZonas(L) {
+      var vig = L.filter(vigenteZo).sort(function (a, b) { return a.recorrido.localeCompare(b.recorrido) || a.km_desde - b.km_desde; });
+      var ter = L.filter(function (x) { return !vigenteZo(x); }).sort(function (a, b) { return b.vigente_hasta.localeCompare(a.vigente_hasta); });
+      function fila(x, vigente) {
+        var prog = x.vigente_desde > hoy;
+        return h('tr', null, td('Dónde', sectorCelda(x)), td('Piquetes', [pqCelda(x), verVanos(x)]), td('Motivo', x.motivo),
+          td('Vigente desde', [UI.fecha(x.vigente_desde), prog ? h('div', null, h('span', { class: 'chip' }, 'programada')) : null]),
+          vigente ? null : td('Terminada el', UI.fecha(sumarDias(x.vigente_hasta, 1))),
+          td('Vanos', [UI.plural(x.princ, 'vano') + ' de vía principal', x.vs.length > x.princ ? h('div', { class: 'rd-peq' }, '+ ' + (x.vs.length - x.princ) + ' fuera') : null], 'num'),
+          td('Cargó', x.cargado_por ? cargo(x.cargado_por, x.cargado_en) : [h('div', null, 'Script 02'), h('div', { class: 'rd-peq' }, UI.fecha(fechaLocal(x.cargado_en)))]),
+          td('', acciones(x, true, vigente)));
+      }
+      return [UI.card('Vigentes', UI.plural(vig.length, 'zona'), vig.length ? tabla(['Dónde', 'Piquetes', 'Motivo', 'Vigente desde', 'Vanos', 'Cargó', ''], vig.map(function (x) { return fila(x, true); }))
+          : h('p', { class: 'rd-vacio' }, tF ? 'Ninguna zona vigente en el tramo ' + tF + '.' : 'Ninguna zona vigente.'),
+          h('p', { class: 'nota' }, 'La zona sigue hasta que alguien la termina (por ejemplo, vía renovada), con el motivo. No cambia el estado ni cierra el ⚑: los vanos que toca muestran «Zona sin medición desde …» en Tramo, Cantón, Ficha e Informe.')),
+        ter.length ? UI.card(null, null, h('details', { id: 'av-cerradas' }, h('summary', null, 'Terminadas (' + ter.length + ')'),
+          tabla(['Dónde', 'Piquetes', 'Motivo', 'Vigente desde', 'Terminada el', 'Vanos', 'Cargó', ''], ter.map(function (x) { return fila(x, false); })))) : null];
+    }
+
+    // ---------------- Alta ----------------
+    function formAlta(que) {
+      var esZona = que === 'zonas', M = D.M;
+      var tramos = D.ref.tramos.map(function (t) { return t.numero; }).filter(function (t) { return M.TODOS.some(function (v) { return v.tramo === t; }); });
+      var t0 = tF && tramos.indexOf(tF) >= 0 ? tF : tramos[0];
+      var sTramo = h('select', { id: 'af-tramo' }, tramos.map(function (t) { return h('option', { value: t, selected: t === t0 }, 'Tramo ' + t); }));
+      var sVia = h('select', { id: 'af-via' }), chTodas = h('input', { type: 'checkbox', id: 'af-todas', style: 'width:auto;margin:0' });
+      var sDesde = h('select', { id: 'af-desde' }), mDesde = h('input', { id: 'af-mdesde', inputmode: 'decimal', value: '0' });
+      var sHasta = h('select', { id: 'af-hasta' }), mHasta = h('input', { id: 'af-mhasta', inputmode: 'decimal', value: '0' });
+      var inTexto = h('textarea', { id: 'af-texto', maxlength: '500', placeholder: esZona ? 'Ej.: paso a nivel seguido de vía con tierra; el Geismar pierde la referencia.' : 'Ej.: obra de Vía y Obra entre estos piquetes; no mandar cuadrilla sin coordinar.' });
+      var inFecha = esZona ? h('input', { type: 'date', id: 'af-fecha', value: hoy, min: '2021-01-01' }) : null;   // c18: el aviso no lleva fecha de fin
+      var prev = h('div', { id: 'af-prev', role: 'status' }), msg = h('div', { role: 'status' });
+      var bt = h('button', { class: 'btn', type: 'button', id: 'af-guardar' }, esZona ? 'Guardar la zona' : 'Guardar el aviso');
+      var btCan = h('button', { class: 'btn sec', type: 'button' }, 'Cancelar');
+      btCan.addEventListener('click', function () { zonaForm.replaceChildren(); btNuevo.hidden = false; });
+      var motivos = esZona ? h('div', { class: 'acciones' }, MOTIVOS.map(function (m) {
+        return h('button', { class: 'btn chico sec', type: 'button', onclick: function () { inTexto.value = m; inTexto.focus(); } }, m.split(':')[0]);
+      })) : null;
+      var S = null;   // sector calculado
+
+      function vanosTV() {
+        var t = +sTramo.value, via = sVia.value;
+        return M.TODOS.filter(function (v) { return v.tramo === t && v.via === via; }).sort(function (a, b) { return a.recorrido.localeCompare(b.recorrido) || a.ki - b.ki; });
+      }
+      function llenarVias() {
+        var vias = UI.viasDelTramo(+sTramo.value).filter(function (vi) { return M.TODOS.some(function (v) { return v.tramo === +sTramo.value && v.via === vi; }); });
+        poner(sVia, vias.map(function (vi) { return h('option', { value: vi }, UI.nombreVia(vi)); }));
+        llenarPq();
+      }
+      function opciones(vs) {   // piquetes: desde de cada vano + el último hasta de cada hoja
+        var porRec = {}, out = [];
+        vs.forEach(function (v) { (porRec[v.recorrido] = porRec[v.recorrido] || []).push(v); });
+        Object.keys(porRec).forEach(function (r) {
+          var L = porRec[r], ops = L.map(function (v) { return h('option', { value: r + '¦' + v.piquete_desde }, v.piquete_desde + (v.fuera ? ' (fuera de vía principal)' : '')); });
+          ops.push(h('option', { value: r + '¦' + L[L.length - 1].piquete_hasta }, L[L.length - 1].piquete_hasta + ' (fin)'));
+          out.push(Object.keys(porRec).length > 1 ? h('optgroup', { label: r }, ops) : ops);
+        });
+        return out;
+      }
+      function llenarPq() {
+        var vs = vanosTV();
+        poner(sDesde, opciones(vs)); poner(sHasta, opciones(vs));
+        var princ = vs.filter(function (v) { return !v.fuera; });
+        if (princ.length) { sDesde.value = princ[0].recorrido + '¦' + princ[0].piquete_desde; sHasta.value = princ[0].recorrido + '¦' + princ[0].piquete_hasta; }
+        calcular();
+      }
+      function kmDe(val, m, que) {
+        var p = val.split('¦'), rec = p[0], cod = p[1], vs = M.RV[rec + '|' + sVia.value] || [];
+        var v = vs.filter(function (x) { return x.piquete_desde === cod; })[0];
+        if (isNaN(m) || m < 0) return { error: que + ': los metros no se entienden (0 o más; coma o punto para decimales).' };
+        if (v) {
+          var L = (v.kf - v.ki) * 1000;
+          if (m > L + 0.5) return { error: que + ': ' + UI.num(m, 1) + ' m desde ' + cod + ' se pasa del vano (mide ' + UI.num(L, 1) + ' m). Usá el piquete siguiente.' };
+          return { rec: rec, km: Math.round((v.ki + m / 1000) * 1e5) / 1e5 };
+        }
+        var u = vs.filter(function (x) { return x.piquete_hasta === cod; }).pop();
+        if (!u) return { error: que + ': el piquete ' + cod + ' no está en la planilla vigente para esta vía.' };
+        if (m > 0.05) return { error: que + ': después de ' + cod + ' no hay vano en esta vía; poné 0 m o el piquete anterior.' };
+        return { rec: rec, km: Math.round(u.kf * 1e5) / 1e5 };
+      }
+      function calcular() {
+        S = null; msg.replaceChildren();
+        if (!sDesde.value || !sHasta.value) { prev.replaceChildren(UI.mensaje('error', 'Este tramo no tiene piquetes en esa vía.')); return; }
+        var a = kmDe(sDesde.value, num(mDesde.value), 'Desde'), b = kmDe(sHasta.value, num(mHasta.value), 'Hasta');
+        var e = a.error || b.error || (a.rec !== b.rec ? 'Los dos piquetes tienen que ser de la misma hoja de la planilla.' : null) ||
+                (b.km <= a.km ? 'El sector tiene que ir de menor a mayor progresiva: «hasta» (' + UI.km(b.km) + ') queda antes o igual que «desde» (' + UI.km(a.km) + ').' : null);
+        if (e) { prev.replaceChildren(UI.mensaje('error', e)); return; }
+        var via = chTodas.checked ? null : sVia.value, vs = tocados(M, a.rec, via, a.km, b.km), princ = vs.filter(function (v) { return !v.fuera; });
+        S = { recorrido: a.rec, via: via, km_desde: a.km, km_hasta: b.km };
+        var otras = (esZona ? D.zonas.filter(vigenteZo) : D.avisos.filter(vigenteAv))
+          .filter(function (z) { return z.recorrido === a.rec && (!z.via || !via || z.via === via) && +z.km_desde < b.km && +z.km_hasta > a.km; });
+        var porVia = {}; vs.forEach(function (v) { (porVia[v.via] = porVia[v.via] || []).push(v); });
+        prev.replaceChildren(UI.card('Qué vanos toca', UI.km(a.km) + ' – ' + UI.num(b.km, 3) + ' · ' + UI.num((b.km - a.km) * 1000, 0) + ' m',
+          h('p', null, h('b', null, UI.plural(princ.length, 'vano') + ' de vía principal'), vs.length > princ.length ? ' y ' + (vs.length - princ.length) + ' fuera de vía principal' : '', chTodas.checked ? ' (todas las vías del tramo)' : '', '.'),
+          Object.keys(porVia).map(function (vi) {
+            var L = porVia[vi];
+            return h('div', { class: 'rd-peq', style: 'margin:2px 0' }, UI.nombreVia(vi) + ': ', L.slice(0, 12).map(function (v, i) { return [i ? ', ' : '', h('span', { class: 'mono' }, v.piquete_desde), ' ', UI.chipEstado(v.estado)]; }),
+              L.length > 12 ? ' … y ' + (L.length - 12) + ' más' : '');
+          }),
+          esZona && princ.length ? h('p', { class: 'nota' }, 'Estos vanos van a mostrar «Zona sin medición desde …» en Tramo, Cantón, Ficha e Informe. El estado no cambia.') : null,
+          (b.km - a.km) > 2 ? h('div', { class: 'rd-aviso' }, h('b', null, 'El sector mide más de 2 km. '), 'Revisá los piquetes antes de guardar.') : null,
+          otras.length ? h('div', { class: 'rd-aviso gris' }, h('b', null, 'Se superpone con ' + UI.plural(otras.length, esZona ? 'zona vigente' : 'aviso vigente', esZona ? 'zonas vigentes' : 'avisos vigentes') + ': '),
+            otras.map(function (z, i) { return (i ? ' · ' : '') + '«' + String(esZona ? z.motivo : z.texto).slice(0, 80) + '»'; })) : null));
+      }
+      sTramo.addEventListener('change', llenarVias);
+      sVia.addEventListener('change', llenarPq);
+      [chTodas, sDesde, sHasta].forEach(function (el) { el.addEventListener('change', calcular); });
+      [mDesde, mHasta].forEach(function (el) { el.addEventListener('input', calcular); });
+      bt.addEventListener('click', async function () {
+        calcular(); if (!S) return;
+        var txt = inTexto.value.trim();
+        if (txt.length < (esZona ? MOTIVO_MIN : TEXTO_MIN) || /^Otro:\s*$/.test(txt)) { msg.replaceChildren(UI.mensaje('error', esZona ? 'Escribí el motivo (al menos ' + MOTIVO_MIN + ' letras).' : 'Escribí el aviso (al menos ' + TEXTO_MIN + ' letras).')); return; }
+        var f = inFecha ? inFecha.value || null : null;
+        if (esZona && !f) { msg.replaceChildren(UI.mensaje('error', 'Falta desde cuándo rige la zona.')); return; }
+        var fila = Object.assign({}, S, esZona ? { motivo: txt, vigente_desde: f, cargado_por: ctx.sesion.id } : { texto: txt });
+        bt.disabled = true; msg.replaceChildren(h('div', { class: 'cargando' }, 'Guardando…'));
+        var e = await guardar(Conexion.cliente.from(esZona ? 'zona_sin_lectura' : 'aviso').insert(fila).select('id'));
+        bt.disabled = false;
+        if (e) { msg.replaceChildren(UI.mensaje('error', e)); return; }
+        recargar(esZona ? 'Zona guardada: ya se ve en Tramo, Cantón, Ficha e Informe.' : 'Aviso guardado: ya se ve en Tramo, Cantón, Ficha e Informe.');
+      });
+      llenarVias();
+      return UI.card(esZona ? 'Cargar una zona sin lectura' : 'Cargar un aviso', 'sector por piquetes de la planilla vigente',
+        h('div', { class: 'rd-form' },
+          h('label', { for: 'af-tramo' }, 'Tramo', sTramo),
+          h('label', { for: 'af-via' }, 'Vía (piquetes de)', sVia),
+          h('label', { for: 'af-todas', class: 'ancho', style: 'display:flex;gap:8px;align-items:center;justify-content:flex-start;color:var(--fg);font-size:14px' }, chTodas, h('span', null, 'Vale para todas las vías del tramo (mismo sector de progresiva)')),
+          h('label', { for: 'af-desde' }, 'Desde el piquete', h('div', { class: 'cf-pqm' }, sDesde, h('span', null, '+'), mDesde, h('span', null, 'm'))),
+          h('label', { for: 'af-hasta' }, 'hasta el piquete', h('div', { class: 'cf-pqm' }, sHasta, h('span', null, '+'), mHasta, h('span', null, 'm'))),
+          h('label', { for: 'af-texto', class: 'ancho' }, esZona ? 'Motivo' : 'Aviso', motivos, inTexto),
+          esZona ? h('label', { for: 'af-fecha' }, 'Vigente desde (desde cuándo no se mide ahí)', inFecha) : null),
+        h('p', { class: 'nota' }, 'Los metros se cuentan desde el piquete hacia el siguiente. Se guarda en km de la planilla vigente. ' + (esZona ? 'La zona sigue hasta que alguien la termina; no cambia el estado ni cierra el ⚑.' : 'El aviso sigue hasta que alguien lo termina.')),
+        prev, msg, h('div', { class: 'acciones' }, bt, btCan));
+    }
+
+    // ---------------- Edición y terminar ----------------
+    function mostrarEdicion(card) { zonaForm.replaceChildren(); btNuevo.hidden = false; zonaEdicion.replaceChildren(card); zonaEdicion.scrollIntoView({ block: 'start' }); }
+    function pie(bt) { var c = h('button', { class: 'btn sec', type: 'button', onclick: function () { zonaEdicion.replaceChildren(); } }, 'Cancelar'); return h('div', { class: 'acciones' }, bt, c); }
+    function encSector(x) { return h('p', { class: 'nota' }, 'Tramo ' + x.tramos.join(', ') + ' · ' + viaTxt(x) + ' · ' + sectorTxt(D.M, x).map(function (q) { return q.t; }).join(' / ') + ' (' + UI.km(x.km_desde) + ' – ' + UI.num(x.km_hasta, 3) + ').'); }
+    var NO_SECTOR = 'El sector no se cambia: si está mal, cargá uno nuevo y terminá este.';
+
+    function editarAviso(x) {
+      var inT = h('textarea', { id: 'ae-texto', maxlength: '500' }); inT.value = x.texto;
+      var msg = h('div', { role: 'status' }), bt = h('button', { class: 'btn', type: 'button', id: 'ae-guardar' }, 'Guardar los cambios');
+      bt.addEventListener('click', async function () {
+        var t = inT.value.trim();
+        if (t.length < TEXTO_MIN) { msg.replaceChildren(UI.mensaje('error', 'Escribí el aviso (al menos ' + TEXTO_MIN + ' letras).')); return; }
+        bt.disabled = true;
+        var e = await guardar(Conexion.cliente.from('aviso').update({ texto: t }).eq('id', x.id).select('id'));
+        bt.disabled = false;
+        if (e) { msg.replaceChildren(UI.mensaje('error', e)); return; }
+        recargar('Aviso actualizado.');
+      });
+      mostrarEdicion(UI.card('Editar el aviso N° ' + x.id, null, encSector(x), h('p', { class: 'nota' }, NO_SECTOR),
+        h('div', { class: 'rd-form' }, h('label', { for: 'ae-texto', class: 'ancho' }, 'Aviso', inT)), msg, pie(bt)));
+    }
+    function editarZona(x) {
+      var inM = h('textarea', { id: 'ze-motivo', maxlength: '1000' }); inM.value = x.motivo;
+      var inD = h('input', { type: 'date', id: 'ze-desde', value: x.vigente_desde, min: '2021-01-01' });
+      var msg = h('div', { role: 'status' }), bt = h('button', { class: 'btn', type: 'button', id: 'ze-guardar' }, 'Guardar los cambios');
+      bt.addEventListener('click', async function () {
+        var m = inM.value.trim(), d = inD.value;
+        if (m.length < MOTIVO_MIN) { msg.replaceChildren(UI.mensaje('error', 'Escribí el motivo (al menos ' + MOTIVO_MIN + ' letras).')); return; }
+        if (!d) { msg.replaceChildren(UI.mensaje('error', 'Falta desde cuándo no se mide ahí.')); return; }
+        bt.disabled = true;
+        var e = await guardar(Conexion.cliente.from('zona_sin_lectura').update({ motivo: m, vigente_desde: d }).eq('id', x.id).select('id'));
+        bt.disabled = false;
+        if (e) { msg.replaceChildren(UI.mensaje('error', e)); return; }
+        recargar('Zona actualizada.');
+      });
+      mostrarEdicion(UI.card('Editar la zona N° ' + x.id, null, encSector(x), h('p', { class: 'nota' }, NO_SECTOR),
+        h('div', { class: 'rd-form' }, h('label', { for: 'ze-motivo', class: 'ancho' }, 'Motivo', inM), h('label', { for: 'ze-desde' }, 'Vigente desde (desde cuándo no se mide ahí)', inD)), msg, pie(bt)));
+    }
+    function terminar(x, esZona) {
+      var ayer = sumarDias(hoy, -1), nombre = esZona ? 'la zona' : 'el aviso';
+      var inN = h('textarea', { id: 'tr-nota', maxlength: '300', placeholder: esZona ? 'Ej.: vía renovada; la medición del 10-12 ya leyó el sector.' : 'Ej.: terminó la obra; ya se puede mandar la cuadrilla.' });
+      var msg = h('div', { role: 'status' }), bt = h('button', { class: 'btn', type: 'button', id: 'tr-guardar' }, esZona ? 'Terminar la zona' : 'Terminar el aviso');
+      bt.addEventListener('click', async function () {
+        var n = inN.value.trim();
+        if (n.length < NOTA_MIN) { msg.replaceChildren(UI.mensaje('error', 'Escribí por qué se termina (al menos ' + NOTA_MIN + ' letras).')); return; }
+        if (esZona && x.vigente_desde > ayer) {
+          msg.replaceChildren(UI.mensaje('error', 'La zona empieza el ' + UI.fecha(x.vigente_desde) + ': no se puede terminar el mismo día en que empieza (ni antes). Si se cargó por error, pedile a un administrador que la borre; si la fecha está mal, corregila con «Editar».')); return;
+        }
+        bt.disabled = true;
+        var nota = ' · Terminad' + (esZona ? 'a' : 'o') + ' el ' + UI.fecha(hoy) + ': ' + n;
+        var cambio = esZona ? { vigente_hasta: ayer, motivo: x.motivo + nota } : { vence: ayer, texto: x.texto + nota };
+        var e = await guardar(Conexion.cliente.from(esZona ? 'zona_sin_lectura' : 'aviso').update(cambio).eq('id', x.id).select('id'));
+        bt.disabled = false;
+        if (e) { msg.replaceChildren(UI.mensaje('error', e)); return; }
+        recargar(esZona ? 'Zona terminada: los vanos ya no muestran «Zona sin medición».' : 'Aviso terminado: ya no se muestra.');
+      });
+      mostrarEdicion(UI.card((esZona ? 'Terminar la zona N° ' : 'Terminar el aviso N° ') + x.id, null, encSector(x),
+        h('p', null, 'Deja de mostrarse ahora. No se borra: queda en «' + (esZona ? 'Terminadas' : 'Terminados') + '» con la fecha de hoy y el motivo.'),
+        h('div', { class: 'rd-form' }, h('label', { for: 'tr-nota', class: 'ancho' }, 'Por qué se termina ' + nombre, inN)), msg, pie(bt)));
+    }
+  }
+
+  Rutas.definir('/avisos', { pantalla: pantalla, titulo: 'Avisos y zonas sin lectura', pestana: 'trabajo', requiere: 'operador' });
+})(window);
+</script>
 <script>/* js/version.js */
 /* =====================================================================
  * version.js — c55/c56 · Versión de la plataforma y aviso de versión nueva
@@ -10605,7 +11036,7 @@ if (typeof module !== "undefined") module.exports = { combinadas: combinadas, el
  * ===================================================================== */
 (function (global) {
   'use strict';
-  var VERSION = { id: 'V1.007', tarea: 'c64', fecha: '15/11/2026', publicado: '2026-11-15T23:30' };
+  var VERSION = { id: 'V1.008', tarea: 'c18', fecha: '16/11/2026', publicado: '2026-11-16T22:00' };
   global.APP_VERSION = VERSION;
 
   var CADA_MS = 30 * 60 * 1000;
