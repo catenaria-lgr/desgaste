@@ -900,8 +900,8 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
     var tabla = {
       consultar: true,
       usuario: !!rol,                                           // cualquier usuario con perfil activo (c31)
-      informar: rol === 'admin' || rol === 'operador',          // c40 (orden de la Coordinación, 23/10/2026): Análisis y gestión solo consulta
-      pedir: rol === 'admin' || rol === 'gestion',                // c48, c59: pide verificación todo Análisis y gestión, con cualquier cargo (script 19)
+      informar: rol === 'admin' || rol === 'operador',          // c40 (orden de la Coordinación, 23/10/2026): Gestión solo consulta
+      pedir: rol === 'admin' || rol === 'gestion',                // c48, c59: pide verificación todo el perfil Gestión, con cualquier cargo (script 19)
       descartar: rol === 'admin' || rol === 'operador' || rol === 'gestion',   // c59: pedir descartar una alarma; lo valida un operador o administrador
       cargar: rol === 'operador' || rol === 'admin',
       clasificar: rol === 'operador' || rol === 'admin',
@@ -3967,7 +3967,7 @@ if (typeof module !== "undefined") module.exports = { combinadas: combinadas, el
 (function () {
   'use strict';
   var h = UI.h;
-  var ROL = { operador: 'Operador', admin: 'Administrador', gestion: 'Análisis y gestión' };
+  var ROL = { operador: 'Operador', admin: 'Administrador', gestion: 'Gestión' };
   var CARGO = { coordinacion: 'Coordinación', jefe_base: 'Jefe de base', asistente: 'Asistente técnico' };
 
   function volverSeguro(v) { return v && v.indexOf('#/') === 0 && v.indexOf('#/ingresar') !== 0 ? v : '#/'; }
@@ -8030,7 +8030,7 @@ if (typeof module !== "undefined") module.exports = { combinadas: combinadas, el
 /* =====================================================================
  * Ayuda (tarea c32, 17/10/2026) — ruta #/ayuda[?p=<pregunta>]
  * Organizada por PREGUNTAS (no por pantallas), cada una con 3–4 pasos y botón «Ir».
- * Según el perfil: Análisis y gestión ve lo suyo; operadores suman Revisión y Mediciones;
+ * Según el perfil: Gestión ve lo suyo; operadores suman Revisión y Mediciones;
  * administradores suman Usuarios. c29 (18/10): verificación con calibre e intervenciones (para quien informa:
  * operadores y administradores; c40) y «En campo» (todos). Se lee en 2 minutos desde el celular.
  * Los umbrales salen de la base (ctx.ref().perfiles), no del código.
@@ -8137,7 +8137,7 @@ if (typeof module !== "undefined") module.exports = { combinadas: combinadas, el
         'Es la lista de verificaciones con calibre e intervenciones que cargaron los operadores y administradores, con quién y cuándo.',
         'Tocá una para ver las lecturas, cómo quedó cada vano y el gráfico.',
         'En la ficha de cada vano, «En campo» muestra lo que se cargó en ese vano.',
-        'Arriba están los pedidos: sectores que Análisis y gestión mandó a verificar (no cambian el estado; se ven como «en verificación desde») o pidió descartar (se ven como «descarte pedido»; la alarma sigue hasta que se valide).'],
+        'Arriba están los pedidos: sectores que el perfil Gestión mandó a verificar (no cambian el estado; se ven como «en verificación desde») o pidió descartar (se ven como «descarte pedido»; la alarma sigue hasta que se valide).'],
         ir: ['#/campo', 'Ir a En campo'] },
       { id: 'sininfo', para: 'todos', q: '¿Dónde no hay información reciente?', pasos: [
         'Listados → Sin información reciente: vanos sin medición válida, nunca medidos o con la última medición de hace más de 1 año.',
@@ -8205,7 +8205,7 @@ if (typeof module !== "undefined") module.exports = { combinadas: combinadas, el
         'Si un informe se reprocesó, cargá el informe nuevo en Carga de medición: la plataforma ofrece reemplazar la publicada sin perder las clasificaciones (ver «¿Cómo cargo una medición nueva?»).'],
         ir: ['#/mediciones', 'Ir a Mediciones'] },
       { id: 'usuarios', para: 'admin', q: '¿Cómo doy de alta o de baja a un usuario?', pasos: [
-        'Administración → Usuarios → Agregar usuario: mail institucional, nombre, perfil (y cargo si es Análisis y gestión). El cargo es solo un dato: todo Análisis y gestión puede pedir verificación o descarte.',
+        'Administración → Usuarios → Agregar usuario: mail institucional, nombre, perfil (y cargo si es Gestión). El cargo es solo un dato: todo el perfil Gestión puede pedir verificación o descarte.',
         'No hace falta mandar la contraseña provisoria que muestra la plataforma: el usuario entra con «Olvidé mi contraseña» y su mail institucional, y elige la suya con el código que le llega.',
         'Olvido de contraseña: «Reiniciar contraseña» en su fila. Baja: «Desactivar» (tocando dos veces). Nunca se borra un usuario.',
         'No desactives «Copia diaria (automática)»: lo usa la copia de seguridad todas las noches.'],
@@ -8312,7 +8312,7 @@ if (typeof module !== "undefined") module.exports = { combinadas: combinadas, el
 /* =====================================================================
  * P13 Usuarios   #/admin/usuarios   (tarea c11, 15/10/2026) — solo administradores
  *
- * Alta a demanda, perfil (Administrador · Operador · Análisis y gestión), cargo (dentro de Análisis y
+ * Alta a demanda, perfil (Administrador · Operador · Gestión; hasta V1.005 «Análisis y gestión»), cargo (dentro de Gestión y
  * gestión: Coordinación · Jefe de base · Asistente técnico), base optativa, desactivar / activar y
  * reiniciar la contraseña. Todo pasa por la función de Supabase «admin-usuarios»
  * (supabase/functions/admin-usuarios), que vuelve a verificar que quien la usa sea administrador.
@@ -8322,7 +8322,7 @@ if (typeof module !== "undefined") module.exports = { combinadas: combinadas, el
 (function () {
   'use strict';
   var h = UI.h;
-  var PERFIL = { admin: 'Administrador', operador: 'Operador', gestion: 'Análisis y gestión' };
+  var PERFIL = { admin: 'Administrador', operador: 'Operador', gestion: 'Gestión' };
   var CARGO = { coordinacion: 'Coordinación', jefe_base: 'Jefe de base', asistente: 'Asistente técnico' };
   var BASES = ['Constitución', 'Quilmes', 'Temperley', 'Varela'];
 
@@ -8378,7 +8378,7 @@ if (typeof module !== "undefined") module.exports = { combinadas: combinadas, el
       var cargo = h('select', { id: 'us-cargo' }, opciones(CARGO, u ? u.cargo : '', 'Elegí el cargo'));
       var base = h('select', { id: 'us-base' }, [h('option', { value: '' }, 'Sin base')].concat(BASES.map(function (b) { return h('option', { value: b, selected: u && u.base === b ? true : null }, b); })));
       var campoCargo = h('div', { class: 'campo' }, h('label', { for: 'us-cargo' }, 'Cargo'), cargo,
-        h('small', { class: 'nota' }, 'Análisis y gestión consulta y pide (verificar o descartar): no carga ni valida datos. El cargo es solo un dato.'));
+        h('small', { class: 'nota' }, 'Gestión consulta y pide (verificar o descartar): no carga ni valida datos. El cargo es solo un dato.'));
       function verCargo() { campoCargo.hidden = perfil.value !== 'gestion'; }
       perfil.addEventListener('change', verCargo); verCargo();
       var guardar = h('button', { class: 'btn', type: 'submit' }, esAlta ? 'Dar de alta' : 'Guardar cambios');
@@ -8389,7 +8389,7 @@ if (typeof module !== "undefined") module.exports = { combinadas: combinadas, el
           esAlta ? null : h('small', { class: 'nota' }, 'Es con lo que ingresa. Si lo corregís, avisale: la contraseña no cambia.')),
         h('div', { class: 'campo' }, h('label', { for: 'us-nombre' }, 'Nombre y apellido'), nombre),
         h('div', { class: 'campo' }, h('label', { for: 'us-perfil' }, 'Perfil'), perfil,
-          h('small', { class: 'nota' }, 'Administrador: todo, más usuarios. Operador: grupo Geismar (carga, mediciones, revisión). Análisis y gestión: Coordinación, jefes de base y asistentes técnicos; solo consultan (no cargan ni validan datos).')),
+          h('small', { class: 'nota' }, 'Administrador: todo, más usuarios. Operador: grupo Geismar (carga, mediciones, revisión). Gestión: Coordinación, jefes de base y asistentes técnicos; solo consultan (no cargan ni validan datos).')),
         campoCargo,
         h('div', { class: 'campo' }, h('label', { for: 'us-base' }, 'Base (optativa)'), base, h('small', { class: 'nota' }, 'Para ver «mi zona». No limita lo que puede hacer.')),
         msg, h('div', { class: 'acciones' }, guardar, cancelar));
@@ -8475,7 +8475,7 @@ if (typeof module !== "undefined") module.exports = { combinadas: combinadas, el
       }
       dibujarTabla();
       var n = function (r) { return lista.filter(function (u) { return u.activo && (!r || u.rol === r); }).length; };
-      listaCont.replaceChildren(UI.card('Usuarios', UI.plural(n(), 'activo') + ' · ' + UI.plural(n('admin'), 'administrador', 'administradores') + ' · ' + UI.plural(n('operador'), 'operador', 'operadores') + ' · ' + n('gestion') + ' de análisis y gestión',
+      listaCont.replaceChildren(UI.card('Usuarios', UI.plural(n(), 'activo') + ' · ' + UI.plural(n('admin'), 'administrador', 'administradores') + ' · ' + UI.plural(n('operador'), 'operador', 'operadores') + ' · ' + n('gestion') + ' de gestión',
         h('div', { class: 'filtros', style: 'margin-bottom:10px' }, buscar, selP), tablaCont));
     }
 
@@ -8564,7 +8564,7 @@ if (typeof module !== "undefined") module.exports = { combinadas: combinadas, el
  * No cambia el estado. Los operadores lo ven pendiente (contador junto a «En campo»); se cierra solo al cargar una verificación
  * con calibre que toca el sector, o lo cierra un operador con motivo. Quien lo pidió (o un administrador) lo cancela. Script 18.
  *
- * Quién informa: Administrador y Operador. c40 (orden de la Coordinación, 23/10/2026): Análisis y gestión (Coordinación, jefes de base, asistentes) solo consulta.
+ * Quién informa: Administrador y Operador. c40 (orden de la Coordinación, 23/10/2026): Gestión (Coordinación, jefes de base, asistentes) solo consulta.
  * La regla la aplica la base (script 08): por vano, valor nuevo = mínimo entre las lecturas del calibre del sector y lo del
  * Geismar FUERA del sector. La base guarda solo el mínimo de todo el vano: cuando ese mínimo cae dentro del sector, la plataforma
  * calcula desde la serie (0,5 m) el mínimo de afuera y lo manda; la base controla que no sea menor que el del vano.
@@ -9005,13 +9005,13 @@ if (typeof module !== "undefined") module.exports = { combinadas: combinadas, el
     return UI.card('Pedidos', pend.length ? UI.plural(pend.length, 'pendiente') : 'ninguno pendiente',
       op && pend.length ? h('div', { class: 'rd-aviso' }, h('b', null, UI.plural(pend.length, 'pedido pendiente', 'pedidos pendientes') + '. '), 'Los de verificación se cierran solos al cargar el calibre; si no hizo falta, cerralos con el motivo. Los de descarte se aceptan o se rechazan desde el pedido.') : null,
       lista.length ? T().tabla([{ t: 'Pedido' }, { t: 'Dónde' }, { t: 'Pidió' }, { t: 'Qué se pide' }, { t: 'Estado' }], filas, 'cf-pedidos')
-        : h('p', { class: 'nota', style: 'margin:0' }, 'No hay pedidos pendientes. Análisis y gestión los hace desde la ficha de un vano o la pantalla de un cantón: «Pedir verificación» o «Pedir descartar la alarma».'),
+        : h('p', { class: 'nota', style: 'margin:0' }, 'No hay pedidos pendientes. El perfil Gestión los hace desde la ficha de un vano o la pantalla de un cantón: «Pedir verificación» o «Pedir descartar la alarma».'),
       otro ? h('p', { class: 'nota' }, otro) : null);
   }
 
   async function pPedir(ctx) {
     if (!Conexion.puede(ctx.sesion, 'pedir')) {
-      ctx.el.replaceChildren(UI.encabezado('Sin permiso'), UI.mensaje('info', 'Mandan a verificar en campo Análisis y gestión y los administradores: el operador carga la verificación cuando llega la planilla. Con tu perfil podés ver los pedidos en «En campo».'),
+      ctx.el.replaceChildren(UI.encabezado('Sin permiso'), UI.mensaje('info', 'Mandan a verificar en campo el perfil Gestión y los administradores: el operador carga la verificación cuando llega la planilla. Con tu perfil podés ver los pedidos en «En campo».'),
         h('p', null, h('a', { class: 'btn sec chico', href: '#/campo' }, 'Ir a En campo')));
       return;
     }
@@ -10021,7 +10021,7 @@ if (typeof module !== "undefined") module.exports = { combinadas: combinadas, el
   ];
   var CLASIF = { sin_revisar: 'sin revisar', dato_erroneo: 'dato erróneo', real: 'real', verificada_campo: 'verificada en campo' };
   var TIPO_EV = { reemplazo: 'reemplazo de hilo', reparacion_paralelo: 'tramo paralelo', reparacion: 'reparación', cambio_canton: 'cambio de cantón', otro: 'otra intervención' };
-  var PERFIL = { admin: 'Administrador', operador: 'Operador', gestion: 'Análisis y gestión' };
+  var PERFIL = { admin: 'Administrador', operador: 'Operador', gestion: 'Gestión' };
   var CARGO = { coordinacion: 'Coordinación', jefe_base: 'Jefe de base', asistente: 'Asistente técnico' };
   var POR_PAGINA = 50;
 
@@ -10432,7 +10432,7 @@ if (typeof module !== "undefined") module.exports = { combinadas: combinadas, el
  * ===================================================================== */
 (function (global) {
   'use strict';
-  var VERSION = { id: 'V1.005', tarea: 'c61', fecha: '15/11/2026', publicado: '2026-11-15T21:30' };
+  var VERSION = { id: 'V1.006', tarea: 'c63', fecha: '15/11/2026', publicado: '2026-11-15T22:00' };
   global.APP_VERSION = VERSION;
 
   var CADA_MS = 30 * 60 * 1000;
@@ -10709,7 +10709,7 @@ if (typeof module !== "undefined") module.exports = { combinadas: combinadas, el
 
     var ctx = {
       el: el, query: r ? r.query : {}, params: r ? r.params : {}, sesion: estado.sesion, ref: ref, miga: miga, hash: hash,
-      tec: Conexion.puede(estado.sesion, 'cargar'),   // vista técnica: operadores y administradores; Análisis y gestión ve la vista limpia (s42, c31)
+      tec: Conexion.puede(estado.sesion, 'cargar'),   // vista técnica: operadores y administradores; Gestión ve la vista limpia (s42, c31)
       titulo: function (t) { document.title = (t ? t + ' · ' : '') + 'Plataforma de desgaste · Línea Roca'; },
       vigente: function () { return n === estado.render; },
       app: App
