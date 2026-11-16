@@ -8491,7 +8491,7 @@ if (typeof module !== "undefined") module.exports = { combinadas: combinadas, el
 /* =====================================================================
  * Trabajo (operador) y Administración (admin) — marcadores (tarea c14)
  *   #/trabajo  hub: P10 Carga (c06) · P11 Revisión (c04) · P12 Avisos y zonas (c18)
- *   #/admin    hub: P13 Usuarios · P14 Umbrales · P15 Planilla (c11, c17) · P16 Auditoría (c11)
+ *   #/admin    hub: P13 Usuarios · P14 Umbrales · P15 Planilla (c11, c17) · P16 Auditoría (c11) · Uso (c64)
  * Las rutas exigen sesión; sin sesión llevan a Ingresar y vuelven acá.
  * c04 (10/10/2026): Revisión ya existe (revision.js): acá solo queda su tarjeta, con el contador.
  * c06 (20/10/2026): Carga de medición ya existe (carga.js).
@@ -8510,7 +8510,8 @@ if (typeof module !== "undefined") module.exports = { combinadas: combinadas, el
     { ruta: 'admin/usuarios', titulo: 'Usuarios', tarea: 'c11', texto: 'Alta, perfil, base, baja y reinicio de contraseña de quienes usan la plataforma.', hecha: true },
     { ruta: 'admin/umbrales', titulo: 'Umbrales', tarea: 'c11', texto: 'Nominal, alerta y límite vigentes por sección, con su historial. Solo lectura.', hecha: true },
     { ruta: 'admin/planilla', titulo: 'Planilla de piquetes', tarea: 'c11 · c17', texto: 'Versiones, códigos que cambiaron, límites de los tramos y planilla original. Solo lectura.', hecha: true },
-    { ruta: 'admin/auditoria', titulo: 'Auditoría', tarea: 'c11', texto: 'Quién hizo qué y cuándo, con filtros y exportación a Excel. Solo lectura.', hecha: true }
+    { ruta: 'admin/auditoria', titulo: 'Auditoría', tarea: 'c11', texto: 'Quién hizo qué y cuándo, con filtros y exportación a Excel. Solo lectura.', hecha: true },
+    { ruta: 'admin/uso', titulo: 'Uso de la plataforma', tarea: 'c64', texto: 'Días de uso por usuario, por perfil y por semana, y pantallas más usadas. Solo lectura.', hecha: true }   // c64: uso.js
   ];
 
   function hub(titulo, sub, items, raiz, pestana) {
@@ -8540,7 +8541,7 @@ if (typeof module !== "undefined") module.exports = { combinadas: combinadas, el
     if (it.hecha) return;  // la pantalla real está en su propio archivo
     Rutas.definir('/' + it.ruta, { pantalla: hoja('Trabajo', '#/trabajo', it), titulo: it.titulo, pestana: 'trabajo', requiere: 'operador' });
   });
-  Rutas.definir('/admin', { pantalla: hub('Administración', 'Usuarios, umbrales, planilla de piquetes y auditoría', ADMIN, 'Administración', 'admin'), titulo: 'Administración', pestana: 'admin', requiere: 'admin' });
+  Rutas.definir('/admin', { pantalla: hub('Administración', 'Usuarios, umbrales, planilla de piquetes, auditoría y uso de la plataforma', ADMIN, 'Administración', 'admin'), titulo: 'Administración', pestana: 'admin', requiere: 'admin' });
   ADMIN.forEach(function (it) {
     if (it.hecha) return;  // Usuarios: usuarios.js · Umbrales, Planilla y Auditoría: administracion.js (c11, 26/10/2026)
     Rutas.definir('/' + it.ruta, { pantalla: hoja('Administración', '#/admin', it), titulo: it.titulo, pestana: 'admin', requiere: 'admin' });
@@ -10416,6 +10417,178 @@ if (typeof module !== "undefined") module.exports = { combinadas: combinadas, el
   window.PantallaAdministracion = { describir: describir, cambios: cambios };   // para las pruebas
 })();
 </script>
+<script>/* js/pantallas/uso.js */
+/* =====================================================================
+ * Administración → Uso de la plataforma (tarea c64, 15/11/2026) — solo administradores, SOLO LECTURA
+ *   #/admin/uso   días de uso por usuario, por semana y perfil, y pantallas más usadas
+ *
+ * Pedido de Sebastián (15/11/2026): saber si la plataforma les resulta funcional; es un parámetro de uso
+ * para la jefatura. Se mide uso, no se controla a las personas.
+ * - Un «día de uso» = el usuario abrió al menos una pantalla ese día (hora argentina). Lo registra la
+ *   plataforma al abrir cada pantalla (App → registrar_uso(), script 22).
+ * - Se guarda el tipo de pantalla («Tramo», «Vano», «Listados»…), nunca qué vano, tramo, medición o dato miró.
+ * - «Último ingreso» (Usuarios) es el inicio de sesión de Supabase: con la sesión abierta en el navegador
+ *   puede quedar viejo aunque la persona use la plataforma todos los días. Acá se ve el uso real.
+ * - Lee todo de uso_resumen() (script 22), que rechaza a quien no sea administrador.
+ * - Sin aviso en la Ayuda (decisión de Sebastián, 15/11/2026).
+ * Todo se arma con UI.h() (texto, nunca HTML con datos de la base).
+ * ===================================================================== */
+(function () {
+  'use strict';
+  var h = UI.h;
+  var PERFIL = { admin: 'Administrador', operador: 'Operador', gestion: 'Gestión' };
+  var ORDEN_PERFIL = ['gestion', 'operador', 'admin'];
+  var CARGO = { coordinacion: 'Coordinación', jefe_base: 'Jefe de base', asistente: 'Asistente técnico' };
+
+  function hora(iso) { var d = new Date(iso); return ('0' + d.getHours()).slice(-2) + ':' + ('0' + d.getMinutes()).slice(-2); }
+  function fechaHora(iso) { return iso ? UI.fecha(iso) + ' ' + hora(iso) : '—'; }
+  function perfilDe(u) { return (PERFIL[u.rol] || u.rol) + (u.cargo ? ' · ' + (CARGO[u.cargo] || u.cargo) : ''); }
+  function diasDesde(iso, hoy) {   // días enteros entre la fecha local de iso y hoy (aaaa-mm-dd)
+    if (!iso) return null;
+    var d = new Date(iso), loc = d.getFullYear() + '-' + ('0' + (d.getMonth() + 1)).slice(-2) + '-' + ('0' + d.getDate()).slice(-2);
+    return Math.round((Date.UTC(+hoy.slice(0, 4), +hoy.slice(5, 7) - 1, +hoy.slice(8, 10)) - Date.UTC(+loc.slice(0, 4), +loc.slice(5, 7) - 1, +loc.slice(8, 10))) / 864e5);
+  }
+  function cuando(iso, hoy) {
+    if (!iso) return 'Sin uso registrado';
+    var d = diasDesde(iso, hoy);
+    return d === 0 ? 'Hoy ' + hora(iso) : d === 1 ? 'Ayer ' + hora(iso) : fechaHora(iso) + ' (hace ' + d + ' días)';
+  }
+  function masUsadas(p) {
+    if (!p) return '—';
+    return Object.keys(p).sort(function (a, b) { return p[b] - p[a] || a.localeCompare(b); }).slice(0, 3)
+      .map(function (k) { return k + ' (' + p[k] + ')'; }).join(' · ');
+  }
+  function kpi(t, v, d) { return h('div', { class: 'kpi' }, h('small', null, t), h('b', null, v), d ? h('span', { class: 'kd' }, d) : null); }
+  function lunes(iso) { return UI.fecha(iso).slice(0, 5); }
+  function nota(t) { return h('p', { class: 'nota', style: 'margin:8px 0 0' }, t); }
+
+  async function pantalla(ctx) {
+    ctx.miga([{ texto: 'Administración', ruta: '#/admin' }, { texto: 'Uso de la plataforma' }]);
+    var titulo = 'Uso de la plataforma', sub = 'Cuántos días usa la plataforma cada persona y qué pantallas abre.';
+    ctx.el.replaceChildren(UI.encabezado(titulo, sub), h('div', { class: 'cargando' }, 'Leyendo el uso…'));
+    var r = await Conexion.rpc('uso_resumen');
+    if (!ctx.vigente()) return;
+    if (r.error) {
+      var c = r.errorCrudo && r.errorCrudo.code;
+      ctx.el.replaceChildren(UI.encabezado(titulo, sub), UI.mensaje('error', c === 'PGRST202' || c === '42883'
+        ? 'Falta correr en la base el script 22 (uso de la plataforma). Hasta entonces no se registra ni se muestra el uso.'
+        : r.error));
+      return;
+    }
+    var R = r.datos || {}, hoy = R.hoy || UI.hoyISO(), U = R.usuarios || [];
+    var f = { perfil: ctx.query.perfil || '', bajas: ctx.query.bajas === '1' };
+
+    var activos = U.filter(function (u) { return u.activo; });
+    var u7 = activos.filter(function (u) { return u.dias_7 > 0; }).length, u30 = activos.filter(function (u) { return u.dias_30 > 0; }).length;
+    var du30 = activos.reduce(function (a, u) { return a + (u.dias_30 || 0); }, 0);
+    var desde = R.desde ? 'Se cuenta desde el ' + UI.fecha(R.desde) + '.' : 'Todavía no hay uso registrado: se empieza a contar desde que se publica esta versión.';
+
+    // --- por usuario ---------------------------------------------------
+    var selP = h('select', { id: 'uso-perfil' }, [h('option', { value: '' }, 'Todos')].concat(ORDEN_PERFIL.map(function (k) {
+      return h('option', { value: k, selected: f.perfil === k ? true : null }, PERFIL[k]); })));
+    var chkB = h('input', { type: 'checkbox', id: 'uso-bajas', checked: f.bajas ? true : null });
+    var cuerpo = h('tbody'), cuenta = h('span', { class: 'nota' });
+    function filtrados() { return U.filter(function (u) { return (f.bajas || u.activo) && (!f.perfil || u.rol === f.perfil); }); }
+    function dibujar() {
+      var L = filtrados();
+      cuenta.textContent = UI.plural(L.length, 'usuario') + (f.perfil ? ' · ' + PERFIL[f.perfil] : '') + (f.bajas ? ' (con los dados de baja)' : '');
+      cuerpo.replaceChildren.apply(cuerpo, L.length ? L.map(function (u) {
+        var viejo = u.ultimo_ingreso && u.ultimo_uso && diasDesde(u.ultimo_ingreso, hoy) - diasDesde(u.ultimo_uso, hoy) >= 7;
+        return h('tr', { style: u.activo ? null : 'color:var(--muted)' },
+          h('td', null, h('b', null, u.nombre), u.activo ? null : h('span', { class: 'nota' }, ' · dado de baja'), u.base ? h('div', { class: 'nota' }, 'Base ' + u.base) : null),
+          h('td', null, perfilDe(u)),
+          h('td', { 'data-l': 'Último uso ' }, cuando(u.ultimo_uso, hoy),
+            u.ultimo_ingreso ? h('div', { class: 'nota', title: 'Inicio de sesión registrado por Supabase (el que se ve en Usuarios)' },
+              'Inicio de sesión: ' + UI.fecha(u.ultimo_ingreso) + (viejo ? ' · la sesión quedó abierta' : '')) : null),
+          h('td', { class: 'num', 'data-l': 'Días · 7 ' }, String(u.dias_7)), h('td', { class: 'num', 'data-l': 'Días · 30 ' }, String(u.dias_30)), h('td', { class: 'num', 'data-l': 'Días · total ' }, String(u.dias_total)),
+          h('td', { class: 'num', 'data-l': 'Pantallas · 30 ' }, String(u.vistas_30)),
+          h('td', { 'data-l': 'Más usadas ' }, masUsadas(u.pantallas_30)));
+      }) : [h('tr', null, h('td', { colspan: 8, class: 'nota' }, 'Ningún usuario con este filtro.'))]);
+    }
+    function aplicar() {
+      f.perfil = selP.value; f.bajas = chkB.checked;
+      var q = []; if (f.perfil) q.push('perfil=' + f.perfil); if (f.bajas) q.push('bajas=1');
+      history.replaceState(history.state, '', location.pathname + location.search + '#/admin/uso' + (q.length ? '?' + q.join('&') : ''));
+      dibujar();
+    }
+    selP.addEventListener('change', aplicar); chkB.addEventListener('change', aplicar);
+    dibujar();
+
+    var exp = h('button', { class: 'btn sec chico', type: 'button' }, 'Exportar a Excel');
+    exp.addEventListener('click', async function () {
+      exp.disabled = true; var t = exp.textContent; exp.textContent = 'Preparando…';
+      try {
+        var L = filtrados();
+        var nombre = await Exportar.excel('uso_plataforma', [{ nombre: 'Uso por usuario',
+          encabezado: ['Uso de la plataforma de desgaste (Geismar 201, Línea Roca) · generado el ' + fechaHora(new Date().toISOString()),
+            desde + ' Un día de uso = abrió al menos una pantalla ese día (hora argentina).' + (f.perfil ? ' Perfil: ' + PERFIL[f.perfil] + '.' : '')],
+          columnas: [{ t: 'Usuario', ancho: 26 }, { t: 'Perfil', ancho: 26 }, { t: 'Base', ancho: 14 }, { t: 'Activo', ancho: 8 }, { t: 'Último uso', ancho: 17 },
+            { t: 'Último inicio de sesión', ancho: 17 }, { t: 'Días de uso (7 días)', tipo: 'num', dec: 0 }, { t: 'Días de uso (30 días)', tipo: 'num', dec: 0 },
+            { t: 'Días de uso (total)', tipo: 'num', dec: 0 }, { t: 'Pantallas abiertas (30 días)', tipo: 'num', dec: 0 }, { t: 'Más usadas (30 días)', ancho: 50 }],
+          filas: L.map(function (u) {
+            return [u.nombre, perfilDe(u), u.base || '', u.activo ? 'Sí' : 'No', u.ultimo_uso ? fechaHora(u.ultimo_uso) : 'Sin uso registrado',
+              u.ultimo_ingreso ? fechaHora(u.ultimo_ingreso) : '', u.dias_7, u.dias_30, u.dias_total, u.vistas_30, masUsadas(u.pantallas_30)];
+          }) }]);
+        UI.toast('Descargado: ' + nombre);
+      } catch (e) { UI.toast('No se pudo exportar: ' + ((e && e.message) || e)); }
+      finally { exp.disabled = false; exp.textContent = t; }
+    });
+
+    var tUsuarios = h('div', { class: 'tabla-cont' }, h('table', { class: 'tabla' },
+      h('thead', null, h('tr', null, h('th', null, 'Usuario'), h('th', null, 'Perfil'), h('th', null, 'Último uso'),
+        h('th', { class: 'num', title: 'Días con al menos una pantalla abierta en los últimos 7 días' }, 'Días · 7'),
+        h('th', { class: 'num', title: 'Días con al menos una pantalla abierta en los últimos 30 días' }, 'Días · 30'),
+        h('th', { class: 'num', title: 'Días con uso desde que se empezó a contar' }, 'Días · total'),
+        h('th', { class: 'num', title: 'Pantallas abiertas en los últimos 30 días' }, 'Pantallas · 30'),
+        h('th', null, 'Más usadas (30 días)'))), cuerpo));
+
+    // --- por semana y perfil -------------------------------------------
+    var sem = {}; (R.semanas || []).forEach(function (s) { (sem[s.semana] = sem[s.semana] || {})[s.rol] = s; });
+    var semanas = Object.keys(sem).sort().reverse();
+    var total = {}; activos.forEach(function (u) { total[u.rol] = (total[u.rol] || 0) + 1; });
+    var tSemanas = semanas.length ? h('div', { class: 'tabla-cont' }, h('table', { class: 'tabla' },
+      h('thead', null, h('tr', null, h('th', null, 'Semana del'), ORDEN_PERFIL.map(function (k) {
+        return h('th', null, PERFIL[k], h('div', { class: 'nota' }, UI.plural(total[k] || 0, 'activo'))); }))),
+      h('tbody', null, semanas.map(function (w) {
+        return h('tr', null, h('td', null, lunes(w)), ORDEN_PERFIL.map(function (k) {
+          var s = sem[w][k];
+          return h('td', { 'data-l': PERFIL[k] + ' ' }, s ? [h('b', null, UI.plural(s.usuarios, 'usuario')), h('div', { class: 'nota' }, UI.plural(s.dias_usuario, 'día', 'días') + ' de uso · ' + UI.plural(s.vistas, 'pantalla'))] : h('span', { class: 'nota' }, '—'));
+        }));
+      })))) : h('p', { class: 'nota' }, 'Sin uso registrado en las últimas 12 semanas.');
+
+    // --- pantallas más usadas ------------------------------------------
+    var P = R.pantallas || [];
+    var tPantallas = P.length ? h('div', { class: 'tabla-cont' }, h('table', { class: 'tabla' },
+      h('thead', null, h('tr', null, h('th', null, 'Pantalla'), h('th', { class: 'num' }, 'Veces abierta'), h('th', { class: 'num' }, 'Usuarios'))),
+      h('tbody', null, P.map(function (p) {
+        return h('tr', null, h('td', null, p.pantalla), h('td', { class: 'num', 'data-l': 'Veces abierta ' }, String(p.vistas)), h('td', { class: 'num', 'data-l': 'Usuarios ' }, String(p.usuarios)));
+      })))) : h('p', { class: 'nota' }, 'Sin uso registrado en los últimos 30 días.');
+
+    ctx.el.replaceChildren(
+      UI.encabezado(titulo, sub),
+      h('div', { class: 'que-hacer', style: '--c: var(--celeste-ink, #12384d)' }, h('b', null, 'Solo lectura. '),
+        'Un día de uso es un día (hora argentina) en que la persona abrió al menos una pantalla. Se registra el tipo de pantalla, no qué vano, tramo o dato miró. ',
+        '«Último ingreso» de Usuarios es el inicio de sesión: como la sesión queda abierta, puede ser viejo aunque la persona use la plataforma todos los días. ', desde),
+      UI.card('Resumen', null,
+        h('div', { class: 'kpis' },
+          kpi('Usuarios activos', String(activos.length), ORDEN_PERFIL.map(function (k) { return (total[k] || 0) + ' ' + PERFIL[k].toLowerCase(); }).join(' · ')),
+          kpi('Usaron la plataforma · 7 días', u7 + ' de ' + activos.length, 'al menos un día en la última semana'),
+          kpi('Usaron la plataforma · 30 días', u30 + ' de ' + activos.length, 'al menos un día en el último mes'),
+          kpi('Días de uso · 30 días', String(du30), 'suma de todos los usuarios activos'))),
+      UI.card('Por usuario', null,
+        h('div', { class: 'filtros' }, h('label', null, h('span', { class: 'nota' }, 'Perfil'), selP)),
+        h('label', { class: 'nota', style: 'display:flex;gap:6px;align-items:center;margin:8px 0' }, chkB, 'Mostrar también los usuarios dados de baja'),
+        h('div', { class: 'acciones', style: 'justify-content:space-between;align-items:center;margin-bottom:8px' }, cuenta, exp),
+        tUsuarios),
+      UI.card('Por semana y perfil', 'últimas 12 semanas', tSemanas,
+        nota('Usuarios distintos que usaron la plataforma esa semana (de lunes a domingo) y cuántos días de uso sumaron entre todos.')),
+      UI.card('Pantallas más usadas', 'últimos 30 días', tPantallas,
+        nota('Cuántas veces se abrió cada tipo de pantalla y cuántas personas distintas la usaron.')));
+  }
+
+  Rutas.definir('/admin/uso', { pantalla: pantalla, titulo: 'Uso de la plataforma', pestana: 'admin', requiere: 'admin' });
+})();
+</script>
 <script>/* js/version.js */
 /* =====================================================================
  * version.js — c55/c56 · Versión de la plataforma y aviso de versión nueva
@@ -10432,7 +10605,7 @@ if (typeof module !== "undefined") module.exports = { combinadas: combinadas, el
  * ===================================================================== */
 (function (global) {
   'use strict';
-  var VERSION = { id: 'V1.006', tarea: 'c63', fecha: '15/11/2026', publicado: '2026-11-15T22:00' };
+  var VERSION = { id: 'V1.007', tarea: 'c64', fecha: '15/11/2026', publicado: '2026-11-15T23:30' };
   global.APP_VERSION = VERSION;
 
   var CADA_MS = 30 * 60 * 1000;
@@ -10739,6 +10912,7 @@ if (typeof module !== "undefined") module.exports = { combinadas: combinadas, el
     }
     if (!permite(r.def.requiere, estado.sesion)) return Pantallas.sinPermiso(ctx, r.def.requiere);
 
+    registrarUso(r.def);   // c64: cuenta la pantalla abierta (solo el tipo de pantalla, no qué vano o dato)
     try { await r.def.pantalla(ctx); }
     catch (e) {
       console.error(e);
@@ -10748,6 +10922,29 @@ if (typeof module !== "undefined") module.exports = { combinadas: combinadas, el
     if (estado.iniciada) { window.scrollTo(0, 0); document.getElementById('contenido').focus({ preventScroll: true }); }
     estado.iniciada = true;
   }
+
+  // ------------------------------------------------------------------
+  // c64 (15/11/2026): uso de la plataforma por usuario. Cada pantalla abierta suma 1 al día de hoy del
+  // propio usuario (registrar_uso(), script 22). Se guarda el tipo de pantalla («Tramo», «Vano»…), nunca
+  // qué vano, tramo o dato. Lo ven solo los administradores (Administración → Uso). Si el script 22 no está
+  // corrido o falla la red, no se avisa nada y la pantalla sigue igual.
+  // Si la pestaña queda abierta de un día para otro, al volver a mirarla cuenta el día nuevo.
+  // ------------------------------------------------------------------
+  var uso = { apagado: false, dia: null, ultima: null };
+  function registrarUso(def) {
+    var s = estado.sesion;
+    if (uso.apagado || !s || !s.rol || s.debeCambiar || !def || def.pestana === 'ingresar') return;
+    var nombre = def.titulo || (def.pestana === 'inicio' ? 'Inicio' : 'Otra');
+    uso.dia = UI.hoyISO(); uso.ultima = nombre;
+    Conexion.rpc('registrar_uso', { p_pantalla: nombre }).then(function (r) {
+      var c = r && r.errorCrudo && r.errorCrudo.code;
+      if (c === 'PGRST202' || c === '42883') uso.apagado = true;   // la función no existe (script 22 sin correr): no insistir
+    }).catch(function () {});
+  }
+  document.addEventListener('visibilitychange', function () {
+    if (document.visibilityState !== 'visible' || !uso.dia || uso.dia === UI.hoyISO()) return;
+    var r = Rutas.resolver(hashActual()); if (r) registrarUso(r.def);
+  });
 
   // ------------------------------------------------------------------
   // Sesión
