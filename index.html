@@ -22,7 +22,7 @@ if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.
 }
 </script>
 <!-- c43 · Versión en un solo archivo de index.html. El original va en carpetas: ver claude/app/ -->
-<title>Desgaste de catenaria · Línea Roca</title>
+<title>Plataforma de desgaste · Línea Roca</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700&family=Roboto+Mono:wght@400;500&display=swap">
 <style>
@@ -58,7 +58,8 @@ code, .mono { font-family: var(--mono); font-size: 0.86em; }
 .barra-sup .in { max-width: 1180px; margin: 0 auto; min-height: var(--alto-sup); padding: 8px 16px; display: flex; align-items: center; gap: 16px; }
 .marca { display: flex; align-items: center; gap: 10px; color: var(--fg); text-decoration: none; flex: none; }
 .marca .t1 { display: block; font-weight: 500; font-size: 13px; letter-spacing: .08em; text-transform: uppercase; line-height: 1.1; }
-.marca .t2 { display: block; font-size: 12px; color: var(--muted); }
+.marca .t2 { display: block; font-size: 12px; color: var(--muted); max-width: 236px; line-height: 1.2; }   /* c61: nombre de la plataforma en dos renglones */
+@media (max-width: 760px) { .marca { min-width: 0; flex: 1 1 auto; } .marca .t2 { max-width: none; font-size: 11px; } }
 .nav-pc { display: flex; align-items: center; gap: 2px; flex: 1; min-width: 0; flex-wrap: wrap; }
 .nav-pc a { text-decoration: none; color: var(--muted); font-size: 14px; font-weight: 400; padding: 6px 12px; border-radius: 999px; white-space: nowrap; }
 .nav-pc a:hover { background: var(--soft); color: var(--fg); }
@@ -672,7 +673,7 @@ ul.au-lista { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; 
   <div class="in">
     <a class="marca" href="#/" aria-label="Red Línea Roca">
       <svg width="32" height="32" viewBox="0 0 34 34" aria-hidden="true"><rect x="0.5" y="0.5" width="33" height="33" rx="7" fill="#ffffff" stroke="#dcdcdc"/><path d="M25.6 3.6V29.6M27.6 3.6V29.6" stroke="#12384d" stroke-width="1"/><path d="M25.6 5.0L27.6 6.7L25.6 8.4M25.6 8.4L27.6 10.1L25.6 11.8M25.6 11.8L27.6 13.5L25.6 15.2M25.6 15.2L27.6 16.9L25.6 18.6M25.6 18.6L27.6 20.3L25.6 22.0M25.6 22.0L27.6 23.7L25.6 25.4M25.6 25.4L27.6 27.1L25.6 28.8" stroke="#12384d" stroke-width=".6" fill="none"/><path d="M24.6 29.8h4" stroke="#12384d" stroke-width="1.1" stroke-linecap="round"/><path d="M25.6 5.6H9.2M25.6 10.6L16.4 5.6" stroke="#12384d" stroke-width=".9" fill="none" stroke-linecap="round"/><path d="M21.6 4.7v1.8M22.6 4.7v1.8M23.6 4.7v1.8" stroke="#12384d" stroke-width=".55"/><path d="M13.5 5.6V9.8" stroke="#12384d" stroke-width=".6"/><path d="M4.6 9.8H22" stroke="#12384d" stroke-width="1.1" stroke-linecap="round"/><path d="M12.6 13.1L11.2 10.4H15.8L14.4 13.1Z" fill="#a9d5ea"/><rect x="11.9" y="12.6" width="3.2" height="1.6" rx=".3" fill="#1c1c1c"/><rect x="7.4" y="13.2" width="1.4" height="1" rx=".2" fill="#f57c00"/><path d="M6.2 25.4V15.6q0-1.4 1.4-1.4h11.8q1.4 0 1.4 1.4v9.8Z" fill="#f5c400" stroke="#1c1c1c" stroke-width=".55"/><rect x="7.4" y="15.3" width="12.2" height="4.6" rx=".6" fill="#2b3a44"/><circle cx="8.8" cy="22.3" r=".85" fill="#d32f2f"/><circle cx="18.2" cy="22.3" r=".85" fill="#d32f2f"/><rect x="5.8" y="24.2" width="15.4" height="2.4" rx=".3" fill="#1c1c1c"/><rect x="6.3" y="24.7" width="2.6" height="1.3" rx=".2" fill="#d84a2b"/><rect x="18.1" y="24.7" width="2.6" height="1.3" rx=".2" fill="#d84a2b"/><path d="M10.6 26.8L8.6 31.4M16.4 26.8L18.4 31.4" stroke="#12384d" stroke-width=".8" stroke-linecap="round"/><path d="M9.6 28.4h7.8M8.8 30.2h9.4" stroke="#12384d" stroke-width=".7" stroke-linecap="round"/></svg>
-      <span><span class="t1">Catenaria · Geismar MC-M-201</span><span class="t2">Gestión y análisis de línea de contacto</span></span>
+      <span><span class="t1">Catenaria · Geismar MC-M-201</span><span class="t2">Plataforma de Análisis y Gestión del Desgaste del Hilo de Contacto</span></span>
     </a>
     <nav class="nav-pc" id="nav-pc" aria-label="Principal"></nav>
   </div>
@@ -717,8 +718,8 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
  * Plataforma de desgaste de catenaria · Línea Roca · Geismar 201
  *
  * Requiere cargar antes  vendor/supabase.js  (supabase-js 2.117.3, build UMD,
- * expone el global `supabase`). Se aloja junto a la app, no desde un CDN, para
- * que la app no dependa de que la red corporativa deje pasar jsdelivr/unpkg.
+ * expone el global `supabase`). Se aloja junto a la plataforma, no desde un CDN, para
+ * que la plataforma no dependa de que la red corporativa deje pasar jsdelivr/unpkg.
  *
  * Uso:
  *   <script src="vendor/supabase.js"><\/script>
@@ -730,7 +731,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
  * - URL y clave publishable son públicas por diseño. La protección real son
  *   los GRANT + RLS de base/01_esquema.sql.
  * - Esta capa NUNCA recibe la clave secreta (service_role) ni la contraseña
- *   de la base. Si alguien la pega acá, la app queda abierta: no hacerlo.
+ *   de la base. Si alguien la pega acá, la plataforma queda abierta: no hacerlo.
  * - El rol que devuelve sesion() sirve solo para mostrar u ocultar pantallas.
  *   Quién puede escribir lo decide la base, no este archivo.
  *
@@ -768,7 +769,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
     var m = (e.message || String(e)).toLowerCase();
     var code = e.code || e.status || '';
     if (m.indexOf('invalid login credentials') >= 0) return 'Mail o contraseña incorrectos.';
-    if (code === 'user_banned' || m.indexOf('user is banned') >= 0) return 'Tu usuario está dado de baja. Si es un error, hablá con un administrador de la app.';
+    if (code === 'user_banned' || m.indexOf('user is banned') >= 0) return 'Tu usuario está dado de baja. Si es un error, hablá con un administrador de la plataforma.';
     if (m.indexOf('email not confirmed') >= 0) return 'El usuario todavía no confirmó el mail.';
     if (m.indexOf('signups not allowed') >= 0 || m.indexOf('signup is disabled') >= 0) return 'El alta de usuarios la hace el administrador.';
     var corta = m.match(/password should be at least (\d+)/);
@@ -1192,7 +1193,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       _scripts[src] = new Promise(function (ok, mal) {
         var s = document.createElement('script');
         // Archivo único (empaquetado): la librería viene embebida como texto y
-        // se ejecuta recién acá, al primer uso (carga rápida al abrir la app).
+        // se ejecuta recién acá, al primer uso (carga rápida al abrir la plataforma).
         var emb = document.querySelector('script[type="text/plain"][data-vendor="' + src + '"]');
         if (emb) s.src = URL.createObjectURL(new Blob([emb.textContent], { type: 'text/javascript' }));
         else s.src = src;
@@ -1366,7 +1367,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
  *   excl: rangos de lecturas aisladas ya clasificadas «dato erróneo» (no cuentan, como en c29).
  *
  * Tolerancias iguales a las de la base (_dentro: 0,5 m; dato erróneo: 1,5 m), para que la base
- * acepte lo que la app calcula.
+ * acepte lo que la plataforma calcula.
  * ===================================================================== */
 (function (global) {
   'use strict';
@@ -1433,7 +1434,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
 /* =====================================================================
  * curva.js — Curva de desgaste (altura residual del hilo, mm) a lo largo de la vía
  * La usan Tramo y vía, Cantón (c15) y la Ficha de vano (c03). ECharts 6.1.0,
- * alojado junto a la app (vendor/echarts.min.js) y cargado solo en estas pantallas.
+ * alojado junto a la plataforma (vendor/echarts.min.js) y cargado solo en estas pantallas.
  *
  *   var c = await Curva.crear(nodo, cfg)   →  { actualizar(cfg), rango(), destruir() }
  *   cfg = {
@@ -1666,7 +1667,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
 <script>/* js/exportar.js */
 /* =====================================================================
  * exportar.js — Excel de los listados y de las consultas (tarea c16)
- * SheetJS 0.18.5 alojado con la app (vendor/xlsx.full.min.js), cargado solo
+ * SheetJS 0.18.5 alojado con la plataforma (vendor/xlsx.full.min.js), cargado solo
  * al tocar «Exportar a Excel». Solo ESCRIBE archivos: las fallas conocidas de
  * esa versión son al leer archivos ajenos, no aplican acá.
  *
@@ -3121,7 +3122,7 @@ if (typeof module !== "undefined") module.exports = { combinadas: combinadas, el
  * - Reanudable: lo publicado se saltea; un borrador a medias se borra y se rehace; una planilla
  *   cargada a medias (no vigente) se borra y se rehace. Los archivos ya subidos se reutilizan.
  * c36 (19/10/2026): el texto de observaciones dice con qué carga entró la medición (ORIGEN_CARGA).
- * c06 (20/10/2026): pantalla «Carga de medición» de la app. planificar() acepta opciones.origen (texto de observaciones)
+ * c06 (20/10/2026): pantalla «Carga de medición» de la plataforma. planificar() acepta opciones.origen (texto de observaciones)
  *   y opciones.etiquetaEvento (nota de los posibles reemplazos). ejecutar() deja cargar a un OPERADOR cuando la planilla
  *   del plan ya es la vigente (solo suma mediciones); cargar o rehacer una planilla sigue siendo solo de administradores.
  * c37 (25/10/2026): opciones.excluir = { 'recorrido|vía|fecha': [huellas] }: Excel que NO aportan a esa medición porque los
@@ -3641,8 +3642,8 @@ if (typeof module !== "undefined") module.exports = { combinadas: combinadas, el
     if (perf && I.umbralesArchivo) {
       var u = I.umbralesArchivo;
       if (Math.abs(u.limite - perf.limite) > 0.001 || Math.abs(u.alerta - perf.alerta) > 0.001 || Math.abs(u.nominal - perf.nominal) > 0.011)
-        avisos.push('El informe trae umbrales distintos a los de la app (límite ' + u.limite + ' · alerta ' + u.alerta + ' · nominal ' + u.nominal + '; la app usa ' +
-          perf.limite + ' · ' + perf.alerta + ' · ' + perf.nominal + ' para ' + I.seccion + ' mm²). El estado se calcula con los de la app.');
+        avisos.push('El informe trae umbrales distintos a los de la plataforma (límite ' + u.limite + ' · alerta ' + u.alerta + ' · nominal ' + u.nominal + '; la plataforma usa ' +
+          perf.limite + ' · ' + perf.alerta + ' · ' + perf.nominal + ' para ' + I.seccion + ' mm²). El estado se calcula con los de la plataforma.');
     }
     if (!I.campanias.length || !perf || !I.via) return { errores: errores, avisos: avisos, datos: datos };
 
@@ -3858,7 +3859,7 @@ if (typeof module !== "undefined") module.exports = { combinadas: combinadas, el
       if (faltan.length) { items.push({ clave: m.clave, publicada: pub, error: 'No se pudieron bajar de la base los Excel con que se armó la publicada (' + faltan.join(', ') + '): no se puede comparar.' }); continue; }
       var excl = {}; excl[m.clave] = excluirPrevio.concat(excluidos.map(function (x) { return x.huella; }));
       var tipo = excluidos.length ? 'reemitido' : 'complemento';
-      var origen = (ctx.origen || 'Carga desde la app (c37).') + (tipo === 'reemitido'
+      var origen = (ctx.origen || 'Carga desde la plataforma (c37).') + (tipo === 'reemitido'
         ? ' Informe re-emitido: reemplaza a ' + excluidos.map(function (x) { return x.nombre; }).join(', ') + '.'
         : ' Completada con ' + nuevos.map(function (n) { return n.nombre; }).join(', ') + '.');
       var plan2 = ctx.CB.planificar(core, P, ctx.planilla, nuevos.concat(usar), { origen: origen, etiquetaEvento: 'la carga de la medición (c37)', excluir: excl });
@@ -3945,6 +3946,7 @@ if (typeof module !== "undefined") module.exports = { combinadas: combinadas, el
     var motivo = motivoDe(it);
     var ctl = await q('Controlar el reemplazo', sb.rpc('reemplazar_medicion', { p_nueva: med.id, p_motivo: motivo, p_confirmar: false }));
     log('Control: ' + ctl.clasificaciones_pasan + ' clasificaciones pasan; ' + ctl.clasificaciones_sin_par + ' no encuentran su lectura.');
+    if (ctl.descartes && ctl.descartes.vigentes) log('Descartes de alarmas: ' + ctl.descartes.pasan + ' pasan a la nueva; ' + ctl.descartes.vuelven_a_validar + ' vuelven a validarse.');   // c60
     var fin = await q('Reemplazar', sb.rpc('reemplazar_medicion', { p_nueva: med.id, p_motivo: motivo, p_confirmar: true }));
     log('✓ ' + etiq + ': publicada la N° ' + med.id + ', anulada la N° ' + it.publicada.id + '.');
     return { nueva: med.id, vieja: it.publicada.id, control: fin, motivo: motivo };
@@ -4036,7 +4038,7 @@ if (typeof module !== "undefined") module.exports = { combinadas: combinadas, el
     });
 
     // c43 (23/10/2026): recuperar la contraseña con un código de 6 dígitos que llega por mail (sin depender de un administrador).
-    // Paso 1: mail → «Mandar código». Paso 2: código + contraseña nueva (dos veces) → entra a la app.
+    // Paso 1: mail → «Mandar código». Paso 2: código + contraseña nueva (dos veces) → entra a la plataforma.
     var recMail = h('input', { id: 'rec-mail', type: 'email', autocomplete: 'username', inputmode: 'email', autocapitalize: 'off', spellcheck: 'false' });
     var recCod = h('input', { id: 'rec-codigo', type: 'text', inputmode: 'numeric', autocomplete: 'one-time-code', maxlength: 10, pattern: '[0-9 ]*', placeholder: '123456' });
     var r1 = campoClave('rec-n1', 'Contraseña nueva', 'new-password'), r2 = campoClave('rec-n2', 'Repetir la contraseña nueva', 'new-password');
@@ -4091,7 +4093,7 @@ if (typeof module !== "undefined") module.exports = { combinadas: combinadas, el
     });
 
     el.replaceChildren(
-      UI.encabezado('Ingresar', 'Con tu mail institucional y tu contraseña. Si no tenés usuario, pedíselo a un administrador de la app.'),
+      UI.encabezado('Ingresar', 'Con tu mail institucional y tu contraseña. Si no tenés usuario, pedíselo a un administrador de la plataforma.'),
       UI.card(null, null, msg, form, rec, rec2));
     if (!matchMedia('(max-width: 760px)').matches) (mail.value ? clave.input : mail).focus();
   }
@@ -4118,7 +4120,7 @@ if (typeof module !== "undefined") module.exports = { combinadas: combinadas, el
       if (r.error) { msg.appendChild(UI.mensaje('error', r.error)); return; }
       c1.input.value = c2.input.value = '';
       msg.appendChild(UI.mensaje('ok', 'Contraseña actualizada.'));
-      if (provisoria) {   // c11: baja la marca de contraseña provisoria y sigue a la app
+      if (provisoria) {   // c11: baja la marca de contraseña provisoria y sigue a la plataforma
         var cc = await Conexion.claveCambiada();
         if (cc.error) { msg.appendChild(UI.mensaje('error', 'La contraseña se cambió, pero no se pudo registrar: ' + cc.error)); return; }
         UI.toast('Contraseña nueva guardada. ¡Bienvenido!');
@@ -4138,7 +4140,7 @@ if (typeof module !== "undefined") module.exports = { combinadas: combinadas, el
     } }, 'Salir');
 
     el.replaceChildren.apply(el, [
-      UI.encabezado('Mi cuenta', window.APP_VERSION ? 'Versión de la app: ' + window.APP_VERSION.id + ' · ' + window.APP_VERSION.fecha + '. Si avisás un problema, decí esta versión.' : null),
+      UI.encabezado('Mi cuenta', window.APP_VERSION ? 'Versión de la plataforma: ' + window.APP_VERSION.id + ' · ' + window.APP_VERSION.fecha + '. Si avisás un problema, decí esta versión.' : null),
       nueva ? UI.mensaje('info', 'Entraste con el link del mail. Definí tu contraseña nueva para terminar.') : null,
       provisoria ? UI.mensaje('info', 'Tu contraseña es provisoria (te la dio un administrador). Definí una nueva para seguir: mínimo 8 caracteres, con letras y números.') : null,
       h('div', { class: 'grilla' },
@@ -6974,7 +6976,7 @@ if (typeof module !== "undefined") module.exports = { combinadas: combinadas, el
  * Fuente: publicadas → v_lectura_vano (estado con las clasificaciones y umbrales de hoy, §9.5);
  * anuladas y borradores → resultado_vano (estado guardado al cargar: no entran en las vistas).
  * Anular: update de medicion a «anulada» con motivo. La base (trigger proteger_medicion) exige el motivo, firma
- * quién y cuándo, y no deja tocar nada más; la auditoría lo registra. No se puede deshacer desde la app.
+ * quién y cuándo, y no deja tocar nada más; la auditoría lo registra. No se puede deshacer desde la plataforma.
  * Cambios c04 (10/10/2026): quién publicó y quién anuló (nombre_firmante); reemplazos descartados;
  *   «Clasificar en Revisión» abre la Revisión filtrada por esta medición.
  * ===================================================================== */
@@ -7349,7 +7351,7 @@ if (typeof module !== "undefined") module.exports = { combinadas: combinadas, el
     var boton = h('button', { class: 'btn peligro', type: 'submit' }, 'Anular la medición');
     var form = h('form', { class: 'form anular', novalidate: true, hidden: true },
       h('p', null, 'Al anularla deja de contar para el estado. ', vigEn ? h('b', null, 'Hoy define el estado actual de ' + UI.plural(vigEn, 'vano') + ': pasan a mostrar la medición anterior con valor válido en cada vano (o «sin medición válida» si no hay otra). ') : 'Hoy no define el estado de ningún vano. ',
-        'La medición se conserva en el historial con el motivo, quién y cuándo. No se puede deshacer desde la app: para corregir, se carga una medición nueva.'),
+        'La medición se conserva en el historial con el motivo, quién y cuándo. No se puede deshacer desde la plataforma: para corregir, se carga una medición nueva.'),
       h('div', { class: 'campo' }, h('label', { for: 'anu-motivo' }, 'Motivo (obligatorio, mínimo ' + MOTIVO_MIN + ' caracteres)'), motivo),
       h('label', { class: 'check', for: 'anu-conf' }, conf, ' Entiendo que no se puede deshacer.'),
       msg, h('div', { class: 'acciones' }, boton, h('button', { class: 'btn lnk', type: 'button', onclick: function () { form.hidden = true; abrir.hidden = false; } }, 'Cancelar')));
@@ -8082,6 +8084,7 @@ if (typeof module !== "undefined") module.exports = { combinadas: combinadas, el
         'Mientras no se valide, la alarma sigue y el vano muestra «descarte pedido». Un operador o administrador tilda los puntos bajos que son falsa lectura (y, si se midió, carga el calibre del punto), o lo rechaza con el motivo.',
         'El vano queda con lo que midió el Geismar fuera de los puntos tildados, o con el calibre si es menor. Un vano no se descarta entero, y nunca se toma la medición anterior.',
         'El descarte vale solo para esa medición: una medición nueva del Geismar vuelve a mandar. Queda con nombres y fecha, un cartel en la ficha, y un operador o administrador lo puede deshacer.',
+        'Si esa medición se vuelve a cargar (informe re-emitido, recarga o planilla nueva), el descarte pasa solo a la nueva, con las mismas firmas. Si las lecturas del vano cambiaron, la alarma vuelve y el pedido queda otra vez pendiente para validarlo de nuevo.',   // c60
         'Si el pedido ya estaba hecho con «Pedir verificación» y resulta falsa lectura, el operador lo clasifica como dato erróneo en Revisión (si tiene ⚑) y cierra el pedido sin cargar, con el motivo.'],
         ir: ['#/listados/atender', 'Ir a Para atender'] },
       { id: 'descarte', para: 'informa', q: '¿Qué hago con un pedido de descarte?', pasos: [   // c59, revisión 15/11
@@ -8092,7 +8095,8 @@ if (typeof module !== "undefined") module.exports = { combinadas: combinadas, el
         'Mirá el gráfico del vano. Sin calibre se descarta sin medir: si es un desgaste real, lo estarías tapando.',
         '«Aceptar los puntos tildados» (dos toques) cambia el estado al instante; un vano sin puntos tildados sigue con su alarma. «Rechazar el descarte» pide el motivo.',
         'Un punto que toca una lectura clasificada «real» no se puede tildar: primero se deshace esa clasificación en Revisión. Una alarma que sale del calibre no se descarta: se anula esa verificación.',
-        'Si te equivocaste, abrí el pedido y usá «Deshacer el descarte»: la alarma vuelve.'],
+        'Si te equivocaste, abrí el pedido y usá «Deshacer el descarte»: la alarma vuelve.',
+        'Un pedido cuya nota empieza con «Vuelve a validarse» es un descarte ya aceptado cuya medición se volvió a cargar con lecturas distintas en el vano: validalo de nuevo con los puntos de la medición nueva.'],   // c60
         ir: ['#/campo', 'Ir a En campo'] },
       { id: 'pedido', para: 'pide', q: '¿Cómo mando a verificar un vano o un cantón?', pasos: [   // c48
         'Entrá a la ficha del vano (o a la pantalla del cantón) y tocá «Pedir verificación».',
@@ -8106,7 +8110,7 @@ if (typeof module !== "undefined") module.exports = { combinadas: combinadas, el
         'Entrá a la ficha del vano (o a la pantalla del cantón) y tocá «Informar verificación».',
         'Completá la fecha, quién midió y el sector: desde el piquete + metros, hasta el piquete + metros. Los metros se cuentan desde el piquete hacia el siguiente.',
         'Cargá cada lectura: piquete, metros y la altura en mm. Podés usar «Agregar posiciones cada 5 m» y llenar solo los mm, o pegar varias lecturas de una planilla. Enter pasa a la siguiente.',
-        'Tocá «Revisar antes de guardar»: la app muestra cómo queda cada vano (por ejemplo «pasa de En alerta a Normal»). Revisá los valores, tildá y guardá.',
+        'Tocá «Revisar antes de guardar»: la plataforma muestra cómo queda cada vano (por ejemplo «pasa de En alerta a Normal»). Revisá los valores, tildá y guardá.',
         'Queda con tu nombre y la fecha. Si te equivocaste, abrila en «En campo» y anulala con el motivo; después cargala de nuevo.'],
         ir: ['#/campo', 'Ir a En campo'] },
       { id: 'pedidoop', para: 'informa', q: '¿Qué hago con un pedido de verificación?', pasos: [   // c48
@@ -8118,15 +8122,15 @@ if (typeof module !== "undefined") module.exports = { combinadas: combinadas, el
         ir: ['#/campo', 'Ir a En campo'] },
       { id: 'resultado', para: 'informa', q: '¿Cómo cambia el estado del vano con el calibre?', pasos: [
         'El vano queda con el valor más bajo entre las lecturas del calibre y lo que midió el Geismar fuera del sector verificado.',
-        'Si verificaste todo el vano, manda el calibre. Si verificaste una parte y afuera el Geismar marcó alerta, el vano sigue en alerta, y la app te dice dónde está ese punto.',
+        'Si verificaste todo el vano, manda el calibre. Si verificaste una parte y afuera el Geismar marcó alerta, el vano sigue en alerta, y la plataforma te dice dónde está ese punto.',
         'Los «dato a confirmar» (⚑) del Geismar que caen dentro del sector quedan cerrados como «verificados en campo».',
         'La medición del Geismar no se borra: sigue en el historial y en el gráfico. Las lecturas del calibre se ven como rombos negros. Cuando llega una medición nueva del Geismar, vuelve a mandar el Geismar.',
-        'Una lectura más de 2 mm por debajo del límite, o más alta que el hilo nuevo, la app la marca para que revises si está bien escrita (por ejemplo, 1,05 en vez de 10,5).'],
+        'Una lectura más de 2 mm por debajo del límite, o más alta que el hilo nuevo, la plataforma la marca para que revises si está bien escrita (por ejemplo, 1,05 en vez de 10,5).'],
         ir: null },
       { id: 'intervencion', para: 'informa', q: '¿Cómo informo una intervención (tramo paralelo, cambio de cantón)?', pasos: [
         'En la ficha del vano o en el cantón tocá «Informar intervención».',
         'Elegí qué se hizo (tramo paralelo, reparación, cambio de cantón, reemplazo u otra), la fecha y el sector (piquete + metros), y describilo.',
-        'Los vanos del sector quedan marcados «hilo intervenido»: la altura que muestra la app es de antes del cambio.',
+        'Los vanos del sector quedan marcados «hilo intervenido»: la altura que muestra la plataforma es de antes del cambio.',
         'La marca se va con la próxima medición del Geismar o con una verificación con calibre del hilo nuevo.'],
         ir: null },
       { id: 'campo', para: 'todos', q: '¿Qué es «En campo»?', pasos: [
@@ -8186,23 +8190,23 @@ if (typeof module !== "undefined") module.exports = { combinadas: combinadas, el
         'Todo se puede deshacer y queda firmado con tu nombre y la fecha.'],
         ir: ['#/revision', 'Ir a Revisión'] },
       { id: 'carga', para: 'operador', q: '¿Cómo cargo una medición nueva?', pasos: [
-        'Trabajo → Carga de medición. La planilla de piquetes no se elige: la app usa la vigente.',
+        'Trabajo → Carga de medición. La planilla de piquetes no se elige: la plataforma usa la vigente.',
         'Elegí los informes de desgaste procesados («Informe Desgaste …xlsx»), uno o varios; podés sumar de varias carpetas. Tocá «Analizar».',
         'Revisá la tabla: una fila por vía y fecha, con críticos, alertas y datos a confirmar. «Ya está publicada: se saltea» = esa fecha ya estaba (suele ser la columna «medición anterior» del informe).',
-        'La app controla cada informe: fecha imposible, lecturas fuera de rango, nada dentro de la planilla o un formato distinto lo sacan de la carga (sacalo de la lista o pedí que se reprocese). Los avisos (piquetes con otra progresiva, huecos, relleno 15,49) no impiden publicar, pero leelos.',
+        'La plataforma controla cada informe: fecha imposible, lecturas fuera de rango, nada dentro de la planilla o un formato distinto lo sacan de la carga (sacalo de la lista o pedí que se reprocese). Los avisos (piquetes con otra progresiva, huecos, relleno 15,49) no impiden publicar, pero leelos.',
         '«Corrimiento»: cuántos metros quedan corridas las lecturas contra la medición anterior de esa zona. De 1 a 5 m es normal (margen de la cámara); con más de 5 m, revisá el km de partida con el procesamiento de datos antes de publicar.',
-        'Si el informe es de una fecha ya publicada (re-emitido, o la otra parte del mismo día en otro archivo, como AV-BZ y BZ-LP), la app lo compara con lo publicado y te muestra qué cambia. Para reemplazarla, tildá «Reemplazar…»: la vieja queda anulada con el motivo y las lecturas ya clasificadas pasan con su firma.',
+        'Si el informe es de una fecha ya publicada (re-emitido, o la otra parte del mismo día en otro archivo, como AV-BZ y BZ-LP), la plataforma lo compara con lo publicado y te muestra qué cambia. Para reemplazarla, tildá «Reemplazar…»: la vieja queda anulada con el motivo y las lecturas ya clasificadas pasan con su firma.',
         'Tildá que revisaste y tocá «Publicar». Al final dice «todo coincide»: ya cuenta para el estado. Si se corta, volvé a publicar: sigue desde donde quedó.',
         'Los datos a confirmar (⚑) nuevos quedan en Revisión. Si cargaste algo equivocado, anulalo desde Mediciones con el motivo.'],
         ir: ['#/carga', 'Ir a Carga de medición'] },
       { id: 'mediciones', para: 'operador', q: '¿Cómo veo o anulo una medición?', pasos: [
         'Mediciones: lista por tramo y vía; tocá una para ver el detalle y en cuántos vanos define hoy el estado.',
-        'Anular: botón en el detalle, con motivo obligatorio. No se deshace desde la app.',
-        'Si un informe se reprocesó, cargá el informe nuevo en Carga de medición: la app ofrece reemplazar la publicada sin perder las clasificaciones (ver «¿Cómo cargo una medición nueva?»).'],
+        'Anular: botón en el detalle, con motivo obligatorio. No se deshace desde la plataforma.',
+        'Si un informe se reprocesó, cargá el informe nuevo en Carga de medición: la plataforma ofrece reemplazar la publicada sin perder las clasificaciones (ver «¿Cómo cargo una medición nueva?»).'],
         ir: ['#/mediciones', 'Ir a Mediciones'] },
       { id: 'usuarios', para: 'admin', q: '¿Cómo doy de alta o de baja a un usuario?', pasos: [
         'Administración → Usuarios → Agregar usuario: mail institucional, nombre, perfil (y cargo si es Análisis y gestión). El cargo es solo un dato: todo Análisis y gestión puede pedir verificación o descarte.',
-        'No hace falta mandar la contraseña provisoria que muestra la app: el usuario entra con «Olvidé mi contraseña» y su mail institucional, y elige la suya con el código que le llega.',
+        'No hace falta mandar la contraseña provisoria que muestra la plataforma: el usuario entra con «Olvidé mi contraseña» y su mail institucional, y elige la suya con el código que le llega.',
         'Olvido de contraseña: «Reiniciar contraseña» en su fila. Baja: «Desactivar» (tocando dos veces). Nunca se borra un usuario.',
         'No desactives «Copia diaria (automática)»: lo usa la copia de seguridad todas las noches.'],
         ir: ['#/admin/usuarios', 'Ir a Usuarios'] },
@@ -8215,29 +8219,29 @@ if (typeof module !== "undefined") module.exports = { combinadas: combinadas, el
         'Administración → Auditoría: cada carga, publicación, anulación, clasificación, verificación, intervención, pedido, cambio de usuario o de configuración, con quién y cuándo.',
         'Filtrá por qué (por ejemplo, Revisión de lecturas), por quién y por fechas. Si sabés el número (de una medición, una lectura o una verificación), escribilo en «Registro».',
         '«Detalle» muestra qué datos cambiaron, antes y después. «Exportar a Excel» baja lo filtrado.',
-        'Es solo lectura: nadie la puede modificar desde la app. Lo hecho con un script de la base figura «sin usuario».'],
+        'Es solo lectura: nadie la puede modificar desde la plataforma. Lo hecho con un script de la base figura «sin usuario».'],
         ir: ['#/admin/auditoria', 'Ir a Auditoría'] },
       { id: 'configuracion', para: 'admin', q: '¿Dónde veo los umbrales y la planilla de piquetes?', pasos: [   // c11
         'Administración → Umbrales: hilo nuevo, alerta y límite de cada sección, desde cuándo rige la alerta y cuántos vanos hay hoy en cada estado.',
-        'La alerta no se cambia desde la app: un cambio recalcula al instante el estado de todos los vanos. Se decide con la Coordinación y se carga con un script de la base.',
+        'La alerta no se cambia desde la plataforma: un cambio recalcula al instante el estado de todos los vanos. Se decide con la Coordinación y se carga con un script de la base.',
         'Administración → Planilla de piquetes: la vigente y las anteriores, los códigos de piquete que cambiaron, los límites de los tramos y el Excel original para descargar.',
-        'Una planilla nueva se carga con la herramienta «Planilla nueva» (fuera de la app), que vuelve a ubicar todas las mediciones.'],
+        'Una planilla nueva se carga con la herramienta «Planilla nueva» (fuera de la plataforma), que vuelve a ubicar todas las mediciones.'],
         ir: ['#/admin/umbrales', 'Ir a Umbrales'] }
     ];
   }
 
-  // Sugerencias (17/10): mail ya armado a la casilla compartida de la app, con la pantalla de la que venía el usuario.
+  // Sugerencias (17/10): mail ya armado a la casilla compartida de la plataforma, con la pantalla de la que venía el usuario.
   var MAIL_SUGERENCIAS = 'catenaria.app@gmail.com';
   var ultimaPantalla = null;
   function recordar() { var hs = location.hash || '#/'; if (hs.indexOf('#/ayuda') !== 0) ultimaPantalla = hs; }
   recordar(); global.addEventListener('hashchange', recordar);
-  var ASUNTO = '[App desgaste] Sugerencia';
+  var ASUNTO = '[Plataforma desgaste] Sugerencia';
   function cuerpoSugerencia(ctx) {
     var s = ctx.sesion || {}, base = location.href.split('#')[0];
     return 'Qué pasó o qué propongo:\n\n\n' +
       '— Datos para ubicar la sugerencia (no borrar) —\n' +
       'Usuario: ' + (s.nombre || s.mail || '') + (s.rol ? ' (' + s.rol + (s.cargo ? ', ' + s.cargo : '') + ')' : '') + '\n' +
-      'Versión de la app: ' + (global.APP_VERSION ? global.APP_VERSION.id : '?') + '\n' +
+      'Versión de la plataforma: ' + (global.APP_VERSION ? global.APP_VERSION.id : '?') + '\n' +
       'Pantalla: ' + base + (ultimaPantalla || '#/') + '\n' +
       'Navegador: ' + navigator.userAgent.slice(0, 120);
   }
@@ -8284,7 +8288,7 @@ if (typeof module !== "undefined") module.exports = { combinadas: combinadas, el
     var campo = lista.filter(function (p) { return p.para === 'informa'; }).map(item);   // c29
     var tecnicas = lista.filter(function (p) { return p.para === 'operador' || p.para === 'admin'; }).map(item);
     ctx.el.replaceChildren(
-      UI.encabezado('Ayuda', 'Tocá una pregunta para ver los pasos.'),
+      UI.encabezado('Ayuda', 'Plataforma de Análisis y Gestión del Desgaste del Hilo de Contacto. Tocá una pregunta para ver los pasos.'),
       UI.card(null, null, h('div', { class: 'ay-lista' }, generales)),
       campo.length ? UI.card('Para informar en campo', 'Operadores y administradores', h('div', { class: 'ay-lista' }, campo)) : null,
       tecnicas.length ? UI.card(ctx.tec && !adm ? 'Para operadores' : 'Para operadores y administradores', null, h('div', { class: 'ay-lista' }, tecnicas)) : null,
@@ -8332,7 +8336,7 @@ if (typeof module !== "undefined") module.exports = { combinadas: combinadas, el
   // Cuadro con la contraseña provisoria y el texto para mandarle al usuario (se ve una sola vez)
   function cuadroClave(titulo, mail, clave) {
     var dir = location.href.split('#')[0];
-    var texto = 'Usuario de la app de desgaste de catenaria (Geismar 201): ' + mail + '\nContraseña provisoria: ' + clave +
+    var texto = 'Usuario de la Plataforma de Análisis y Gestión del Desgaste del Hilo de Contacto (Geismar 201): ' + mail + '\nContraseña provisoria: ' + clave +
       '\nAl entrar te pide cambiarla. Dirección: ' + dir;
     var copiar = h('button', { class: 'btn sec chico', type: 'button' }, 'Copiar para mandar');
     copiar.addEventListener('click', async function () {
@@ -8342,7 +8346,7 @@ if (typeof module !== "undefined") module.exports = { combinadas: combinadas, el
     return h('div', { class: 'msg ok', role: 'status', style: 'margin-bottom:12px' },
       h('b', null, titulo), h('br'),
       'Mail: ', h('b', null, mail), ' · Contraseña provisoria: ', h('code', { class: 'clave-prov' }, clave), h('br'),
-      h('span', { class: 'nota' }, 'Se muestra una sola vez. Pasásela al usuario por un medio privado; al entrar, la app le pide cambiarla.'),
+      h('span', { class: 'nota' }, 'Se muestra una sola vez. Pasásela al usuario por un medio privado; al entrar, la plataforma le pide cambiarla.'),
       h('pre', { class: 'texto-clave' }, texto),
       h('div', { class: 'acciones' }, copiar));
   }
@@ -8354,7 +8358,7 @@ if (typeof module !== "undefined") module.exports = { combinadas: combinadas, el
     var agregar = h('button', { class: 'btn', type: 'button' }, 'Agregar usuario');
     agregar.addEventListener('click', function () { abrirForm(null); });
     ctx.el.replaceChildren(
-      UI.encabezado('Usuarios', 'Alta, perfil, base, baja y contraseña de quienes usan la app. Solo administradores.'),
+      UI.encabezado('Usuarios', 'Alta, perfil, base, baja y contraseña de quienes usan la plataforma. Solo administradores.'),
       h('div', { class: 'acciones', style: 'margin-bottom:12px' }, agregar), arriba, formCont, listaCont);
 
     async function cargar() {
@@ -8503,7 +8507,7 @@ if (typeof module !== "undefined") module.exports = { combinadas: combinadas, el
     { ruta: 'avisos', titulo: 'Avisos y zonas sin lectura', tarea: 'c18', texto: 'Alta y vencimiento de avisos; zonas fijas donde el Geismar no lee.' }
   ];
   var ADMIN = [
-    { ruta: 'admin/usuarios', titulo: 'Usuarios', tarea: 'c11', texto: 'Alta, perfil, base, baja y reinicio de contraseña de quienes usan la app.', hecha: true },
+    { ruta: 'admin/usuarios', titulo: 'Usuarios', tarea: 'c11', texto: 'Alta, perfil, base, baja y reinicio de contraseña de quienes usan la plataforma.', hecha: true },
     { ruta: 'admin/umbrales', titulo: 'Umbrales', tarea: 'c11', texto: 'Nominal, alerta y límite vigentes por sección, con su historial. Solo lectura.', hecha: true },
     { ruta: 'admin/planilla', titulo: 'Planilla de piquetes', tarea: 'c11 · c17', texto: 'Versiones, códigos que cambiaron, límites de los tramos y planilla original. Solo lectura.', hecha: true },
     { ruta: 'admin/auditoria', titulo: 'Auditoría', tarea: 'c11', texto: 'Quién hizo qué y cuándo, con filtros y exportación a Excel. Solo lectura.', hecha: true }
@@ -8562,7 +8566,7 @@ if (typeof module !== "undefined") module.exports = { combinadas: combinadas, el
  *
  * Quién informa: Administrador y Operador. c40 (orden de la Coordinación, 23/10/2026): Análisis y gestión (Coordinación, jefes de base, asistentes) solo consulta.
  * La regla la aplica la base (script 08): por vano, valor nuevo = mínimo entre las lecturas del calibre del sector y lo del
- * Geismar FUERA del sector. La base guarda solo el mínimo de todo el vano: cuando ese mínimo cae dentro del sector, la app
+ * Geismar FUERA del sector. La base guarda solo el mínimo de todo el vano: cuando ese mínimo cae dentro del sector, la plataforma
  * calcula desde la serie (0,5 m) el mínimo de afuera y lo manda; la base controla que no sea menor que el del vano.
  * Los ⚑ del Geismar dentro del sector quedan «verificados en campo». Todo queda con nombre y fecha; se anula con motivo.
  * ===================================================================== */
@@ -9549,7 +9553,7 @@ if (typeof module !== "undefined") module.exports = { combinadas: combinadas, el
   var h = UI.h;
   var XLSX_SRC = 'vendor/xlsx.full.min.js', CORE_SRC = '../importador/core.js', CARGA_SRC = '../importador/carga_base.js';
   var CTL_SRC = '../importador/controles.js', REEMP_SRC = '../importador/reemplazo.js';   // c37
-  var ORIGEN = 'Carga desde la app (Trabajo → Carga de medición, c06).';
+  var ORIGEN = 'Carga desde la plataforma (Trabajo → Carga de medición, c06).';
   var VIA = { ASC: 'ascendente', DESC: 'descendente', V1: 'Vía 1', V2: 'Vía 2', V3: 'Vía 3', V4: 'Vía 4' };
   function T() { return global.PantallaTramo; }
   function n(x) { return (x || 0).toLocaleString('es-AR'); }
@@ -9616,7 +9620,7 @@ if (typeof module !== "undefined") module.exports = { combinadas: combinadas, el
 
     ctx.el.replaceChildren(
       UI.encabezado('Carga de medición', 'Informe de desgaste procesado → revisar → publicar'),
-      h('p', { class: 'nota cg-intro' }, 'La app lee el Excel en esta computadora, ubica cada lectura en los vanos de la planilla vigente y calcula el estado con el mínimo de todas las lecturas del vano, como en todo el histórico. Nada se escribe hasta que toques «Publicar». Lo que ya está publicado no se toca ni se duplica.'),
+      h('p', { class: 'nota cg-intro' }, 'La plataforma lee el Excel en esta computadora, ubica cada lectura en los vanos de la planilla vigente y calcula el estado con el mínimo de todas las lecturas del vano, como en todo el histórico. Nada se escribe hasta que toques «Publicar». Lo que ya está publicado no se toca ni se duplica.'),
       cardPl, cardInf, cardRes, cardPub);
 
     function invalidar() {
@@ -9929,12 +9933,14 @@ if (typeof module !== "undefined") module.exports = { combinadas: combinadas, el
           hechos.push(rr);
           escribir('Reemplazo: la N° ' + rr.vieja + ' quedó anulada y la N° ' + rr.nueva + ' publicada. Clasificaciones que pasaron: ' + rr.control.clasificaciones_pasan +
             (rr.control.clasificaciones_sin_par ? '; ' + rr.control.clasificaciones_sin_par + ' no encontraron su lectura (quedan en el historial de la anulada)' : '') + '.');
+          var dz = rr.control.descartes || (rr.resultado && rr.resultado.descartes);   // c60: descartes de alarmas que pasan a la nueva
+          if (dz && (dz.pasan || dz.vuelven_a_validar)) escribir('Descartes de alarmas: ' + dz.pasan + ' pasaron a la medición nueva' + (dz.vuelven_a_validar ? '; ' + dz.vuelven_a_validar + ' vuelven a validarse (las lecturas del vano cambiaron): quedan como pedido pendiente en «En campo»' : '') + '.');
         }
         estado.replaceChildren(h('div', { class: 'cargando' }, 'Publicado. Controlando contra la base…'));
         ok = rep;
       } catch (e) {
         escribir('ERROR: ' + ((e && e.message) || e));
-        estado.replaceChildren(UI.mensaje('error', (Conexion.traducirError(e.original || e) || e.message) + ' — Lo que quedó a medias no se ve en la app. Podés volver a tocar «Publicar»: sigue desde donde quedó.'));
+        estado.replaceChildren(UI.mensaje('error', (Conexion.traducirError(e.original || e) || e.message) + ' — Lo que quedó a medias no se ve en la plataforma. Podés volver a tocar «Publicar»: sigue desde donde quedó.'));
         bt.disabled = false; chk.disabled = false;
       }
       try {
@@ -10085,7 +10091,7 @@ if (typeof module !== "undefined") module.exports = { combinadas: combinadas, el
 
     ctx.el.replaceChildren(
       UI.encabezado('Umbrales', 'Con qué valores la base calcula el estado de cada vano. Son los mismos que usan todas las pantallas, los listados y los Excel.'),
-      soloLectura('El límite y la altura del hilo nuevo son fijos por sección. La alerta no se cambia desde la app: un cambio recalcula al instante el estado de todos los vanos, también el de las mediciones viejas, porque la base usa la alerta vigente hoy. Si hace falta cambiarla, se decide con la Coordinación y se carga con un script de la base, con fecha de vigencia y motivo; queda en la Auditoría.'),
+      soloLectura('El límite y la altura del hilo nuevo son fijos por sección. La alerta no se cambia desde la plataforma: un cambio recalcula al instante el estado de todos los vanos, también el de las mediciones viejas, porque la base usa la alerta vigente hoy. Si hace falta cambiarla, se decide con la Coordinación y se carga con un script de la base, con fecha de vigencia y motivo; queda en la Auditoría.'),
       h('div', { class: 'grilla', style: 'grid-template-columns: repeat(auto-fit, minmax(300px, 1fr))' }, tarjetas),
       M ? null : UI.mensaje('error', 'No se pudo leer el estado de la red: los conteos por estado no se muestran.'),
       UI.card('Historial de la alerta', UI.plural(hist.length, 'registro'),
@@ -10152,7 +10158,7 @@ if (typeof module !== "undefined") module.exports = { combinadas: combinadas, el
 
     ctx.el.replaceChildren(
       UI.encabezado('Planilla de piquetes', 'Con qué planilla se ubica cada medición en los vanos. Hay una sola vigente.'),
-      soloLectura('Una planilla nueva no se carga desde la app: se carga con la herramienta «Planilla nueva» (reubicar_c17.html), que vuelve a ubicar todas las mediciones publicadas desde sus Excel originales y la activa de una sola vez. Antes de usarla tiene que estar corrido el script 16 de la base.'),
+      soloLectura('Una planilla nueva no se carga desde la plataforma: se carga con la herramienta «Planilla nueva» (reubicar_c17.html), que vuelve a ubicar todas las mediciones publicadas desde sus Excel originales y la activa de una sola vez. Antes de usarla tiene que estar corrido el script 16 de la base.'),
       vigente ? null : UI.mensaje('error', 'No hay ninguna planilla vigente en la base.'),
       h('div', null, versiones.map(tarjeta)),
       UI.card('Códigos de piquete que cambiaron', UI.plural(equiv.length, 'código'),
@@ -10390,7 +10396,7 @@ if (typeof module !== "undefined") module.exports = { combinadas: combinadas, el
 
     ctx.el.replaceChildren(
       UI.encabezado('Auditoría', 'Quién hizo qué y cuándo: cargas, publicaciones, anulaciones, clasificaciones, calibre, intervenciones, pedidos, usuarios y configuración.'),
-      soloLectura('La auditoría la escribe la base sola en cada cambio; nadie la puede modificar ni borrar desde la app. Lo hecho con un script de la base (SQL Editor) o en la carga inicial figura «sin usuario».'),
+      soloLectura('La auditoría la escribe la base sola en cada cambio; nadie la puede modificar ni borrar desde la plataforma. Lo hecho con un script de la base (SQL Editor) o en la carga inicial figura «sin usuario».'),
       UI.card(null, null,
         h('div', { class: 'filtros' },
           h('label', null, h('span', { class: 'nota' }, 'Qué'), selG),
@@ -10412,7 +10418,7 @@ if (typeof module !== "undefined") module.exports = { combinadas: combinadas, el
 </script>
 <script>/* js/version.js */
 /* =====================================================================
- * version.js — c55/c56 · Versión de la app y aviso de versión nueva
+ * version.js — c55/c56 · Versión de la plataforma y aviso de versión nueva
  * - Versión V1.001, V1.002… (c56, Sebastián 29/10/2026): sube 0,001 con
  *   cada actualización publicada. Se ve en Mi cuenta (debajo del título)
  *   y va en el mail de «Mandar una sugerencia».
@@ -10426,7 +10432,7 @@ if (typeof module !== "undefined") module.exports = { combinadas: combinadas, el
  * ===================================================================== */
 (function (global) {
   'use strict';
-  var VERSION = { id: 'V1.004', tarea: 'c59', fecha: '15/11/2026', publicado: '2026-11-15T08:00' };
+  var VERSION = { id: 'V1.005', tarea: 'c61', fecha: '15/11/2026', publicado: '2026-11-15T21:30' };
   global.APP_VERSION = VERSION;
 
   var CADA_MS = 30 * 60 * 1000;
@@ -10441,7 +10447,7 @@ if (typeof module !== "undefined") module.exports = { combinadas: combinadas, el
     if (!a) return;
     a.textContent = '';
     var t = document.createElement('span');
-    t.textContent = 'Hay una versión nueva de la app (' + String(nueva.id) + (nueva.fecha ? ' · ' + String(nueva.fecha) : '') + '). ';
+    t.textContent = 'Hay una versión nueva de la plataforma (' + String(nueva.id) + (nueva.fecha ? ' · ' + String(nueva.fecha) : '') + '). ';
     var b = document.createElement('button');
     b.type = 'button';
     b.textContent = 'Actualizar';
@@ -10486,7 +10492,7 @@ if (typeof module !== "undefined") module.exports = { combinadas: combinadas, el
 </script>
 <script>/* js/app.js */
 /* =====================================================================
- * app.js — Esqueleto de la app (tarea c14)
+ * app.js — Esqueleto de la plataforma (tarea c14)
  * Barras de navegación (PC arriba, celular abajo), miga de pan, control de
  * acceso por ruta, sesión y regreso desde el link de recuperar contraseña.
  * Cambios c04 (10/10/2026): el contador de Trabajo lo da la base (pendientes_revision()).
@@ -10621,7 +10627,7 @@ if (typeof module !== "undefined") module.exports = { combinadas: combinadas, el
       op ? h('a', { href: '#/trabajo', class: on('trabajo'), 'aria-current': cur('trabajo') }, 'Trabajo', contador()) : null,
       adm ? h('a', { href: '#/admin', class: on('admin'), 'aria-current': cur('admin') }, 'Administración') : null,
       h('span', { class: 'sep' }),
-      s && s.rol ? h('a', { href: '#/ayuda', class: 'ayuda ' + (on('ayuda') || ''), title: 'Ayuda: cómo usar la app', 'aria-label': 'Ayuda', 'aria-current': cur('ayuda') }, '?') : null,   // c32
+      s && s.rol ? h('a', { href: '#/ayuda', class: 'ayuda ' + (on('ayuda') || ''), title: 'Ayuda: cómo usar la plataforma', 'aria-label': 'Ayuda', 'aria-current': cur('ayuda') }, '?') : null,   // c32
       s && s.rol
         ? h('a', { href: '#/cuenta', class: 'usuario ' + (on('cuenta') || ''), title: 'Mi cuenta', 'aria-current': cur('cuenta') }, nombreCorto(s))
         : h('a', { href: '#/ingresar', class: 'discreto ' + (on('ingresar') || ''), 'aria-current': cur('ingresar') }, 'Ingresar')
@@ -10649,7 +10655,7 @@ if (typeof module !== "undefined") module.exports = { combinadas: combinadas, el
       s && s.rol ? it('campo', 'En campo', '#/campo', 'verificaciones e intervenciones' + (estado.campo ? ' · ' + textoCampo() : '')) : null,   // c29
       Conexion.puede(s, 'clasificar') ? it('mediciones', 'Mediciones', '#/mediciones') : null,   // s42: solo operadores y administradores
       adm ? it('admin', 'Administración', '#/admin') : null,
-      s && s.rol ? it('ayuda', 'Ayuda', '#/ayuda', 'cómo usar la app') : null,   // c32
+      s && s.rol ? it('ayuda', 'Ayuda', '#/ayuda', 'cómo usar la plataforma') : null,   // c32
       s && s.rol ? it('cuenta', 'Mi cuenta', '#/cuenta', nombreCorto(s)) : it('ingresar', 'Ingresar', '#/ingresar', 'con tu mail institucional')
     ].filter(Boolean));
     var hoja = document.getElementById('hoja-mas');
@@ -10704,7 +10710,7 @@ if (typeof module !== "undefined") module.exports = { combinadas: combinadas, el
     var ctx = {
       el: el, query: r ? r.query : {}, params: r ? r.params : {}, sesion: estado.sesion, ref: ref, miga: miga, hash: hash,
       tec: Conexion.puede(estado.sesion, 'cargar'),   // vista técnica: operadores y administradores; Análisis y gestión ve la vista limpia (s42, c31)
-      titulo: function (t) { document.title = (t ? t + ' · ' : '') + 'Desgaste de catenaria · Línea Roca'; },
+      titulo: function (t) { document.title = (t ? t + ' · ' : '') + 'Plataforma de desgaste · Línea Roca'; },
       vigente: function () { return n === estado.render; },
       app: App
     };
