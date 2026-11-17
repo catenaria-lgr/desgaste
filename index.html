@@ -874,6 +874,20 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       return r.data && r.data.error ? { error: r.data.error } : { datos: r.data, error: null };
     } catch (e) { return { error: traducirError(e) }; }
   }
+  // c30 (16/11/2026): aviso por mail al publicar una medición nueva. La función «avisos-mail» manda TODOS los avisos
+  // pendientes (los deja la base al publicar, script 24) en copia oculta a los usuarios activos. Nunca dos veces la misma.
+  async function avisoPublicacion() {
+    try {
+      var r = await cliente.functions.invoke('avisos-mail', { body: { accion: 'publicacion' } });
+      if (r.error) {
+        var j = null;
+        try { j = r.error.context && typeof r.error.context.json === 'function' ? await r.error.context.json() : null; } catch (e) { /* sin JSON */ }
+        if (!j && /failed to send|fetch/i.test(r.error.message || '')) return { error: 'No se pudo llegar a la función «avisos-mail».' };
+        return { error: (j && j.error) || traducirError(r.error) };
+      }
+      return r.data && r.data.error ? { error: r.data.error } : { datos: r.data, error: null };
+    } catch (e) { return { error: traducirError(e) }; }
+  }
   // El usuario cambió su contraseña provisoria: se baja la marca (script 05)
   async function claveCambiada() {
     var r = await cliente.rpc('clave_cambiada');
@@ -1048,7 +1062,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
   global.Conexion = {
     cliente: cliente,
     url: SUPABASE_URL,
-    adminUsuarios: adminUsuarios, claveCambiada: claveCambiada, sesion: sesion, ingresar: ingresar, salir: salir,
+    adminUsuarios: adminUsuarios, avisoPublicacion: avisoPublicacion, claveCambiada: claveCambiada, sesion: sesion, ingresar: ingresar, salir: salir,
     recuperarClave: recuperarClave, pedirCodigo: pedirCodigo, restablecerConCodigo: restablecerConCodigo, cambiarClave: cambiarClave, alCambiarSesion: alCambiarSesion,
     puede: puede,
     leer: leer, leerTodo: leerTodo, rpc: rpc, referencia: referencia, estadoPorMinimo: estadoPorMinimo,
@@ -8216,7 +8230,8 @@ if (typeof module !== "undefined") module.exports = { combinadas: combinadas, el
         '«Corrimiento»: cuántos metros quedan corridas las lecturas contra la medición anterior de esa zona. De 1 a 5 m es normal (margen de la cámara); con más de 5 m, revisá el km de partida con el procesamiento de datos antes de publicar.',
         'Si el informe es de una fecha ya publicada (re-emitido, o la otra parte del mismo día en otro archivo, como AV-BZ y BZ-LP), la plataforma lo compara con lo publicado y te muestra qué cambia. Para reemplazarla, tildá «Reemplazar…»: la vieja queda anulada con el motivo y las lecturas ya clasificadas pasan con su firma.',
         'Tildá que revisaste y tocá «Publicar». Al final dice «todo coincide»: ya cuenta para el estado. Si se corta, volvé a publicar: sigue desde donde quedó.',
-        'Los datos a confirmar (⚑) nuevos quedan en Revisión. Si cargaste algo equivocado, anulalo desde Mediciones con el motivo.'],
+        'Los datos a confirmar (⚑) nuevos quedan en Revisión. Si cargaste algo equivocado, anulalo desde Mediciones con el motivo.',
+        'Al publicar una medición nueva sale solo un mail a todos los usuarios activos (en copia oculta) con los vanos nuevos en crítico o en alerta. Si no sale, queda pendiente y sale con la próxima publicación. Reemplazar o anular no manda mail.'],   // c30
         ir: ['#/carga', 'Ir a Carga de medición'] },
       { id: 'mediciones', para: 'operador', q: '¿Cómo veo o anulo una medición?', pasos: [
         'Mediciones: lista por tramo y vía; tocá una para ver el detalle y en cuántos vanos define hoy el estado.',
@@ -9931,6 +9946,22 @@ if (typeof module !== "undefined") module.exports = { combinadas: combinadas, el
       cardPub.hidden = false;
     }
 
+    // c30: no frena la pantalla; el resultado queda como una línea arriba del control contra la base
+    async function avisarPorMail(verif, escribir) {
+      var linea = h('div', { class: 'cargando cg-mail' }, 'Mandando el aviso por mail a los usuarios…');
+      verif.parentNode.insertBefore(linea, verif);
+      var r = await Conexion.avisoPublicacion();
+      if (r.error) {
+        escribir('Aviso por mail: no salió — ' + r.error);
+        linea.replaceWith(UI.mensaje('info', 'El aviso por mail no salió (' + r.error.replace(/ — El aviso queda pendiente.*$/, '') + '). Queda pendiente en la base y sale solo con la próxima publicación.'));
+        return;
+      }
+      var d = r.datos || {};
+      escribir('Aviso por mail: ' + (d.mediciones ? UI.plural(d.mediciones, 'medición', 'mediciones') + ', ' + UI.plural(d.destinatarios, 'usuario') + (d.aviso ? ' (' + d.aviso + ')' : '') : 'nada pendiente') + '.');
+      if (!d.mediciones) { linea.remove(); return; }
+      linea.replaceWith(UI.mensaje('ok', 'Aviso por mail enviado a ' + UI.plural(d.destinatarios, 'usuario activo', 'usuarios activos') + ' de la plataforma (en copia oculta).' + (d.aviso ? ' ' + d.aviso : '')));
+    }
+
     async function publicar(bt, chk, barra, estado, log, det, verif, nuevas, cambios) {
       bt.disabled = true; chk.disabled = true; btAna.disabled = true; S.corriendo = true;
       var chR = document.getElementById('cg-reemp-ok'); if (chR) chR.disabled = true;
@@ -10002,6 +10033,8 @@ if (typeof module !== "undefined") module.exports = { combinadas: combinadas, el
           UI.toast(UI.plural(ok.mediciones.cargadas + ok.mediciones.rehechas, 'medición publicada', 'mediciones publicadas') + '.');
         }
       } catch (e) { escribir('No se pudo controlar: ' + ((e && e.message) || e)); }
+      // c30: aviso por mail de las mediciones nuevas publicadas (también si la publicación se cortó a mitad: lo publicado quedó pendiente en la base)
+      if (nuevas.length) avisarPorMail(verif, escribir);
       global.removeEventListener('beforeunload', antesDeSalir);
       S.corriendo = false; revisar();
     }
@@ -11036,7 +11069,7 @@ if (typeof module !== "undefined") module.exports = { combinadas: combinadas, el
  * ===================================================================== */
 (function (global) {
   'use strict';
-  var VERSION = { id: 'V1.008', tarea: 'c18', fecha: '16/11/2026', publicado: '2026-11-16T22:00' };
+  var VERSION = { id: 'V1.009', tarea: 'c30', fecha: '17/11/2026', publicado: '2026-11-17T12:00' };
   global.APP_VERSION = VERSION;
 
   var CADA_MS = 30 * 60 * 1000;
