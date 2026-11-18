@@ -3980,6 +3980,416 @@ if (typeof module !== "undefined") module.exports = { combinadas: combinadas, el
   if (typeof module !== 'undefined' && module.exports) module.exports = api; else global.Reemplazo = api;
 })(typeof window !== 'undefined' ? window : this);
 </script>
+<script type="text/plain" data-vendor="../importador/alinear.js">/* ../importador/alinear.js (diferida: no se ejecuta al abrir) */
+/* Alineación automática del km de partida (opción B) — c28, 26/10/2026.
+   Sin dependencias: corre en Node y en el navegador, junto a crudo.js y core.js.
+
+   Qué resuelve: el crudo del Geismar trae la distancia recorrida desde el arranque («Space [m]»), no la progresiva.
+   La progresiva = km de partida ± Space/1000 (ascendente suma, descendente resta). Hoy el km de partida se ajusta
+   a mano hasta que la desviación (zigzag del hilo) coincide con la de una medición de referencia (crudos_c19.md §9).
+   Acá se hace solo: se prueba el corrimiento cada 0,1 m y se queda el que da la mayor correlación.
+
+   Reglas acordadas (crudos_c19.md §9, §12, §13; Sebastián 19/10/2026):
+   - Referencia: una medición fija por recorrido y vía, que marca un administrador (s48). Se compara la DESVIACIÓN.
+   - Ventana: los 2 km centrales de la parte común entre la pasada y la referencia.
+   - Si la correlación da < 0,95, se prueban las ventanas vecinas de 2 km, de la más cercana al centro hacia afuera,
+     y se usa la primera que pase. Si ninguna pasa, queda el km de partida que cargó el operador y se avisa.
+   - Solo corrimiento (sin escala del odómetro) mientras convive con el procesamiento actual.
+   - Control: que los picos de desviación caigan sobre los piquetes de la planilla. Si no, se avisa (no bloquea).
+
+   Glosario:
+   - correlación (r): cuánto se parecen dos curvas en forma, de −1 a 1. 1 = idénticas (aunque cambie la escala).
+   - corrimiento: cuántos metros se mueve toda la pasada para que coincida con la referencia. */
+
+var ALINEAR = {
+  rejilla_m: 0.1,      // paso de la rejilla común y del corrimiento probado
+  rango_m: 30,         // corrimiento máximo que se busca a cada lado del km cargado por el operador
+  ventana_km: 2,       // ancho de la ventana de comparación
+  ventanaMin_km: 0.2,  // medición corta: ventana = toda la superposición, si llega a 0,2 km (c51)
+  rMin: 0.95,          // correlación mínima para aceptar una ventana (crudos_c19.md §13)
+  coberturaMin: 0.5,   // fracción de la ventana con dato en las dos curvas
+  huecoMax_m: 2,       // más separación que esto entre dos lecturas = hueco (no se interpola)
+  ambiguedad: 0.03,    // si otro corrimiento a más de 10 m da casi la misma r, se avisa
+  picoBusca_m: 15,     // control de picos: busca el pico ±15 m alrededor de cada piquete
+  picoAviso_m: 3       // control de picos: mediana mayor que esto → aviso (ruido normal ±1–2 m, s23). A confirmar
+};
+
+function _num(s) { s = String(s).trim(); if (!s || /nan/i.test(s)) return NaN; return parseFloat(s.replace(",", ".")); }
+function _esNum(v) { return typeof v === "number" && isFinite(v); }
+function _mediana(a) { var s = a.slice().sort(function (p, q) { return p - q; }), n = s.length; return n ? (n % 2 ? s[(n - 1) / 2] : (s[n / 2 - 1] + s[n / 2]) / 2) : null; }
+
+/* .catz.txt (altura y desviación, una fila cada 0,25 m) → Space, desviación y altura del hilo de contacto.
+   Se quedan solo las filas con desviación (paso 1 del procesamiento actual). */
+function leerCrudoDesviacion(texto) {
+  var lineas = texto.split(/\r?\n/);
+  var enc = lineas[0].split(";").map(function (c) { return c.trim(); });
+  function col(re) { for (var i = 0; i < enc.length; i++) if (re.test(enc[i])) return i; return -1; }
+  var cS = col(/^space/i), cD = col(/^descentramiento del hilo de con/i), cA = col(/^altura del hilo de contacto/i);
+  if (cS < 0 || cD < 0) throw new Error("No parece un crudo de altura y desviación (.catz): faltan «Space [m]» o «Descentramiento del hilo de contacto».");
+  var S = [], D = [], A = [], total = 0;
+  for (var f = 1; f < lineas.length; f++) {
+    if (!lineas[f].trim()) continue;
+    total++;
+    var p = lineas[f].split(";"), d = _num(p[cD]);
+    if (isNaN(d)) continue;
+    S.push(_num(p[cS])); D.push(d); A.push(cA >= 0 ? _num(p[cA]) : NaN);
+  }
+  return { filas: total, conDato: S.length, space: Float64Array.from(S), desv: Float64Array.from(D), altura: Float64Array.from(A),
+           largo_m: S.length ? S[S.length - 1] : 0 };
+}
+
+/* Serie de desviación con un km de partida dado, ordenada por km creciente (paso 2 del procesamiento actual). */
+function serieDesviacion(cd, kmPartida, sentido) {
+  var sg = sentido === "DESC" ? -1 : 1, n = cd.space.length, x = new Float64Array(n), y = new Float64Array(n);
+  for (var i = 0; i < n; i++) { var j = sg < 0 ? n - 1 - i : i; x[i] = kmPartida + sg * cd.space[j] / 1000; y[i] = cd.desv[j]; }
+  return { x: x, y: y };
+}
+
+/* Informe de altura y desviación (hoja «Datos Filtrado» como matriz) → series de desviación que trae.
+   Cada una es un par de columnas «Prog [Km]» + «Desv LC dd-mm-aaaa». La submuestra «Desv LC*» no se usa.
+   Las lecturas exactamente 0 se toman como relleno (el 22-05-2025 trae ceros donde no hay dato). */
+function seriesDesviacionInforme(df) {
+  var enc = df[0] || [], out = [];
+  for (var c = 1; c < enc.length; c++) {
+    var t = String(enc[c] || "");
+    if (!/^desv\s*lc/i.test(t) || /\*/.test(t) || !/prog|^\s*km\s*$/i.test(String(enc[c - 1] || ""))) continue;
+    var m = /(\d{1,2})[-\/.](\d{1,2})[-\/.](\d{4})/.exec(t);
+    var px = [], py = [], ceros = 0, atras = 0;
+    for (var f = 1; f < df.length; f++) {
+      var r = df[f] || [], xv = r[c - 1], yv = r[c];
+      if (!_esNum(xv) || !_esNum(yv)) continue;
+      if (yv === 0) { ceros++; continue; }
+      if (px.length && xv < px[px.length - 1]) { atras++; continue; }   // filas pegadas de otra medición (crudos_c19.md §7.2)
+      px.push(xv); py.push(yv);
+    }
+    if (px.length < 1000) continue;
+    out.push({ rotulo: t.trim(), fecha: m ? m[3] + "-" + ("0" + m[2]).slice(-2) + "-" + ("0" + m[1]).slice(-2) : null,
+               columna: c, x: Float64Array.from(px), y: Float64Array.from(py), km_desde: px[0], km_hasta: px[px.length - 1],
+               ceros: ceros, fuera_de_orden: atras });
+  }
+  return out;
+}
+
+/* Valores de una serie (x creciente) sobre una rejilla; NaN fuera de rango o en huecos. */
+function _rejilla(x, y, g0, paso, n, huecoKm) {
+  var out = new Float64Array(n), j = 0;
+  for (var k = 0; k < n; k++) {
+    var g = g0 + k * paso;
+    while (j < x.length - 1 && x[j + 1] < g) j++;
+    if (g < x[0] || g > x[x.length - 1] || j >= x.length - 1) { out[k] = NaN; continue; }
+    var dx = x[j + 1] - x[j];
+    if (dx > huecoKm || dx <= 0) { out[k] = NaN; continue; }
+    out[k] = y[j] + (y[j + 1] - y[j]) * (g - x[j]) / dx;
+  }
+  return out;
+}
+
+function _corr(a, ia, b, ib, n, minN) {
+  var sa = 0, sb = 0, saa = 0, sbb = 0, sab = 0, m = 0;
+  for (var k = 0; k < n; k++) {
+    var u = a[ia + k], v = b[ib + k];
+    if (u !== u || v !== v) continue;          // NaN
+    sa += u; sb += v; saa += u * u; sbb += v * v; sab += u * v; m++;
+  }
+  if (m < minN) return { r: NaN, n: m };
+  var cov = sab - sa * sb / m, va = saa - sa * sa / m, vb = sbb - sb * sb / m;
+  return { r: va > 0 && vb > 0 ? cov / Math.sqrt(va * vb) : NaN, n: m };
+}
+
+/* Corrimiento que mejor hace coincidir la pasada (con kmInicial) con la referencia, en una ventana [k0, k1] de la referencia.
+   Corrimiento positivo = toda la pasada se mueve hacia km mayores (km de partida + corrimiento). */
+function _probarVentana(nueva, ref, k0, k1, op) {
+  var paso = op.rejilla_m / 1000, R = Math.round(op.rango_m / op.rejilla_m), n = Math.round((k1 - k0) / paso);
+  var hueco = op.huecoMax_m / 1000;
+  var b = _rejilla(ref.x, ref.y, k0, paso, n, hueco);
+  // la pasada se lee en una rejilla más ancha: a(g − corrimiento) = aExt[R − L + k]
+  var aExt = _rejilla(nueva.x, nueva.y, k0 - R * paso, paso, n + 2 * R, hueco);
+  var minN = Math.round(n * op.coberturaMin), mejor = null, lista = [];
+  for (var L = -R; L <= R; L++) {
+    var c = _corr(aExt, R - L, b, 0, n, minN);
+    lista.push(c.r);
+    if (c.r === c.r && (!mejor || c.r > mejor.r)) mejor = { L: L, r: c.r, n: c.n };
+  }
+  if (!mejor) return { ventana: [k0, k1], r: null, corrimiento_m: null, cobertura: 0 };
+  // segundo mejor a más de 10 m del mejor: si es casi igual, la alineación es ambigua (zigzag repetido)
+  var seg = null, lejos = Math.round(10 / op.rejilla_m);
+  for (var i = 0; i < lista.length; i++) if (Math.abs(i - R - mejor.L) > lejos && lista[i] === lista[i] && (seg === null || lista[i] > seg)) seg = lista[i];
+  return { ventana: [k0, k1], r: mejor.r, corrimiento_m: +(mejor.L * op.rejilla_m).toFixed(1), cobertura: +(mejor.n / n).toFixed(2),
+           r_segundo: seg, en_borde: Math.abs(mejor.L) === R };
+}
+
+/* Alineación completa.
+   cd: leerCrudoDesviacion(); sentido "ASC"|"DESC"; kmInicial: progresiva del piquete de inicio (o la que cargó el operador);
+   ref: { x, y } de la medición de referencia (seriesDesviacionInforme o serieDesviacion de otro crudo).
+   Devuelve { ok, kmPartida, corrimiento_m, ventana, r, probadas, avisos }. */
+function alinearPartida(cd, sentido, kmInicial, ref, opciones) {
+  var op = {}; Object.keys(ALINEAR).forEach(function (k) { op[k] = (opciones && opciones[k] != null) ? opciones[k] : ALINEAR[k]; });
+  var nueva = serieDesviacion(cd, kmInicial, sentido), avisos = [];
+  var lo = Math.max(nueva.x[0], ref.x[0]), hi = Math.min(nueva.x[nueva.x.length - 1], ref.x[ref.x.length - 1]);
+  var w = op.ventana_km;
+  // medición corta (c51, 30/10/2026): si se superponen menos de 2 km, la ventana es toda la superposición (mínimo 0,2 km)
+  if (hi - lo < w && hi - lo >= op.ventanaMin_km) { w = hi - lo; avisos.push("Medición corta (" + (w * 1000).toFixed(0) + " m en común con la referencia): la ubicación es menos segura; revisar las curvas antes de aprobar."); }
+  if (!(hi - lo >= w)) return { ok: false, kmInicial: kmInicial, kmPartida: kmInicial, corrimiento_m: 0, probadas: [],
+    avisos: ["La pasada y la referencia se superponen menos de " + w + " km (pasada km " + nueva.x[0].toFixed(3) + "–" + nueva.x[nueva.x.length - 1].toFixed(3) +
+             ", referencia km " + ref.x[0].toFixed(3) + "–" + ref.x[ref.x.length - 1].toFixed(3) + "). Queda el km de partida cargado; revisar el piquete de inicio."] };
+  var centro = (lo + hi) / 2, ventanas = [[centro - w / 2, centro + w / 2]];
+  for (var k = 1; ; k++) {
+    var izq = centro - w / 2 - k * w, der = centro - w / 2 + k * w, alguna = false;
+    if (der + w <= hi + 1e-9) { ventanas.push([der, der + w]); alguna = true; }
+    if (izq >= lo - 1e-9) { ventanas.push([izq, izq + w]); alguna = true; }
+    if (!alguna) break;
+  }
+  var probadas = [], elegida = null;
+  for (var i = 0; i < ventanas.length; i++) {
+    var p = _probarVentana(nueva, ref, ventanas[i][0], ventanas[i][1], op);
+    p.ventana = [+p.ventana[0].toFixed(3), +p.ventana[1].toFixed(3)];
+    p.r = p.r === null ? null : +p.r.toFixed(4);
+    p.r_segundo = p.r_segundo == null ? null : +p.r_segundo.toFixed(4);
+    probadas.push(p);
+    if (p.r !== null && p.r >= op.rMin && p.cobertura >= op.coberturaMin && !p.en_borde) { elegida = p; break; }
+  }
+  if (!elegida) {
+    if (probadas.some(function (q) { return q.en_borde && q.r !== null && q.r >= op.rMin; }))
+      avisos.push("El mejor corrimiento cae en el borde de lo que se busca (±" + op.rango_m + " m): el km de partida cargado parece errado en más de " + op.rango_m + " m. Revisar el piquete de inicio.");
+    avisos.push("Ninguna ventana de " + w + " km llegó a r ≥ " + op.rMin + " (mejor: " +
+      (probadas.filter(function (q) { return q.r !== null; }).map(function (q) { return q.r; }).sort(function (a, b) { return b - a; })[0] || "—") +
+      "). Queda el km de partida cargado: ajustarlo a mano mirando las curvas.");
+    return { ok: false, kmInicial: kmInicial, kmPartida: kmInicial, corrimiento_m: 0, probadas: probadas, avisos: avisos, opciones: op };
+  }
+  if (elegida !== probadas[0]) avisos.push("La ventana central (km " + probadas[0].ventana[0].toFixed(2) + "–" + probadas[0].ventana[1].toFixed(2) + ") dio r = " +
+    (probadas[0].r === null ? "sin dato" : probadas[0].r) + ": se usó km " + elegida.ventana[0].toFixed(2) + "–" + elegida.ventana[1].toFixed(2) + ".");
+  if (elegida.r_segundo !== null && elegida.r_segundo > elegida.r - op.ambiguedad)
+    avisos.push("Alineación ambigua: otro corrimiento a más de 10 m da r = " + elegida.r_segundo + ". Revisar las curvas antes de aprobar.");
+  var kmP = kmInicial + elegida.corrimiento_m / 1000;
+  return { ok: true, kmInicial: kmInicial, kmPartida: +kmP.toFixed(5), corrimiento_m: elegida.corrimiento_m, ventana: elegida.ventana,
+           r: elegida.r, probadas: probadas, avisos: avisos, opciones: op };
+}
+
+/* Control de picos sobre piquetes: el zigzag cambia de lado en cada poste, así que el extremo de la desviación
+   tiene que caer sobre la progresiva de cada piquete. Por piquete: distancia (m) del extremo más cercano (±15 m);
+   mediana por ventanas de 2 km y total. Valor positivo = el pico cae a km mayor que el piquete. */
+function controlPicos(serie, progresivas, opciones) {
+  var busca = ((opciones && opciones.picoBusca_m) || ALINEAR.picoBusca_m) / 1000, aviso = (opciones && opciones.picoAviso_m) || ALINEAR.picoAviso_m;
+  var x = serie.x, y = serie.y, ds = [], j0 = 0;
+  var piq = progresivas.filter(function (p) { return p >= x[0] + 2 * busca && p <= x[x.length - 1] - 2 * busca; }).sort(function (a, b) { return a - b; });
+  piq.forEach(function (p) {
+    while (j0 < x.length && x[j0] < p - 2 * busca) j0++;
+    var loc = [], ix = [];
+    for (var j = j0; j < x.length && x[j] <= p + 2 * busca; j++) { loc.push(y[j]); if (x[j] > p - busca && x[j] < p + busca) ix.push(j); }
+    if (ix.length < 40) return;
+    var med = _mediana(loc), mejor = -1, dmax = -1;
+    ix.forEach(function (j) { var v = Math.abs(y[j] - med); if (v > dmax) { dmax = v; mejor = j; } });
+    ds.push({ km: p, d_m: (x[mejor] - p) * 1000 });
+  });
+  var ventanas = [];
+  if (ds.length) for (var c0 = Math.floor(ds[0].km); c0 < ds[ds.length - 1].km; c0 += 2) {
+    var en = ds.filter(function (q) { return q.km >= c0 && q.km < c0 + 2; });
+    if (en.length >= 8) ventanas.push({ km_desde: c0, km_hasta: c0 + 2, piquetes: en.length, mediana_m: +_mediana(en.map(function (q) { return q.d_m; })).toFixed(1) });
+  }
+  var total = ds.length ? +_mediana(ds.map(function (q) { return q.d_m; })).toFixed(1) : null;
+  var fuera = ventanas.filter(function (v) { return Math.abs(v.mediana_m) > aviso; });
+  var avisos = [];
+  if (total === null) avisos.push("No se pudo controlar picos sobre piquetes: pocos piquetes con lectura.");
+  else if (Math.abs(total) > aviso) avisos.push("Los picos de desviación caen en promedio " + (total > 0 ? "+" : "") + total.toFixed(1) + " m respecto de los piquetes de la planilla (aviso a partir de ±" + aviso + " m).");
+  if (fuera.length) avisos.push(fuera.length + " de " + ventanas.length + " tramos de 2 km con los picos a más de ±" + aviso + " m de los piquetes: " +
+    fuera.slice(0, 6).map(function (v) { return "km " + v.km_desde + "–" + v.km_hasta + " (" + (v.mediana_m > 0 ? "+" : "") + v.mediana_m + " m)"; }).join(", ") + (fuera.length > 6 ? "…" : "") + ".");
+  return { piquetes: ds.length, mediana_m: total, ventanas: ventanas, ok: !avisos.length, avisos: avisos, detalle: ds };
+}
+
+/* Curvas para mostrar al operador: pasada alineada y referencia en una ventana, con un punto cada `paso_m`. */
+function curvasComparacion(cd, sentido, kmPartida, ref, k0, k1, paso_m) {
+  var paso = (paso_m || 0.5) / 1000, n = Math.max(2, Math.round((k1 - k0) / paso)), nueva = serieDesviacion(cd, kmPartida, sentido);
+  var a = _rejilla(nueva.x, nueva.y, k0, paso, n, ALINEAR.huecoMax_m / 1000), b = _rejilla(ref.x, ref.y, k0, paso, n, ALINEAR.huecoMax_m / 1000);
+  var km = [], va = [], vb = [];
+  for (var i = 0; i < n; i++) { km.push(+(k0 + i * paso).toFixed(5)); va.push(a[i] === a[i] ? +a[i].toFixed(1) : null); vb.push(b[i] === b[i] ? +b[i].toFixed(1) : null); }
+  return { km: km, nueva: va, referencia: vb };
+}
+
+/* ===== c51 paso 0 — Alineación contra la planilla (opción D) — 29/10/2026 =====
+   Decisión de Sebastián (26/10/2026 20:26, auditoria_c52.md §6): la medición se ubica llevando los picos del zigzag
+   sobre los piquetes de la planilla vigente, con un corrimiento global y una corrección por zona de 1 km.
+   La medición de referencia (alinearPartida, opción B) queda como CONTROL, no como verdad.
+
+   Por qué: el zigzag cambia de lado en cada poste, así que el extremo de la desviación tiene que caer sobre el piquete.
+   c52 encontró 31 zonas de la planilla corridas 2–5,6 m (tramos 1 y 3, 9, 11, 13, 7 desc., 5-15-19 desc.): alinear contra
+   la referencia deja la medición bien respecto de otras mediciones, pero mal respecto de los vanos de la planilla.
+
+   Pasos:
+   1. Grueso: si hay km de partida aprobado por la referencia, se parte de ahí; si no, se barre ±30 m cada 1 m y se elige
+      el corrimiento con más piquetes con pico a ≤ 2 m (búsqueda corta de ±5 m, para no tomar el pico del poste vecino).
+   2. Global: controlPicos (±15 m) → mediana de pico − piquete = corrimiento global. Se repite una vez.
+   3. Zonas: residuo por piquete (después del global) → mediana en ±0,5 km (≥ 8 piquetes). Se aplica solo donde
+      |mediana| ≥ 1,5 m; más de 8 m no se aplica y se avisa (pico ajeno o planilla muy corrida: revisar a mano).
+   4. Corrección final d(x) = global + zona(x), interpolada entre piquetes. Lectura en x → x − d(x)/1000.
+   5. Control: % de piquetes con pico a ≤ 3 m antes y después; diferencia con la referencia (si hay).
+
+   Glosario:
+   - corrimiento global: cuántos metros se mueve toda la pasada (equivale a corregir el km de partida).
+   - corrección por zona: metros extra que se mueve un sector de 1 km, donde la planilla tiene los postes corridos.
+   - d > 0: el pico cae a km mayor que el piquete → la lectura se mueve a km menor. */
+
+var PLANILLA = {
+  grueso_m: 15,        // barrido grueso sin referencia: ±15 m (c51: el escáner arranca a la altura del piquete anotado; error real 0–8 m)
+  topeExtra_m: 3,      // el ajuste fino no se aleja del inicio más que grueso_m + 3 m
+  gruesoPaso_m: 1,
+  gruesoBusca_m: 5,    // búsqueda corta del pico en el barrido grueso
+  gruesoOk_m: 2,       // pico a ≤ 2 m del piquete = acierto en el barrido grueso
+  ambigua_m: 15,       // otra ubicación a ≥ 15 m…
+  ambiguaRel: 0.85,    // …con ≥ 85 % de los aciertos de la mejor → «ubicación ambigua» (aviso)
+  zona_km: 0.5,        // semiancho de la zona (±0,5 km = 1 km)
+  zonaMinPiq: 8,       // piquetes mínimos en la zona
+  zonaUmbral_m: 1.5,   // correcciones menores no se aplican (son ruido del método: 0,3–1,5 m, c52 §4)
+  zonaMax_m: 8,        // correcciones mayores no se aplican: aviso
+  controlOk_m: 3,      // control: pico a ≤ 3 m del piquete
+  controlMin: 0.4,     // menos del 40 % de los piquetes así después de alinear → aviso (c51: bien alineado da 55–85 %; tramos 1 y 3, 54–61 %)
+  difRefAviso_m: 3     // global distinto de la referencia en más de 3 m → aviso
+};
+
+function _opP(o) { var r = {}; Object.keys(PLANILLA).forEach(function (k) { r[k] = (o && o[k] != null) ? o[k] : PLANILLA[k]; }); return r; }
+
+/* Corre una serie {x, y} con una corrección. corr: número (m, global) o { global_m, zonas: [[km, m]] }. Devuelve x ordenado. */
+function corregirSerie(serie, corr) {
+  var g = typeof corr === "number" ? corr : (corr.global_m || 0), tab = typeof corr === "number" ? [] : (corr.zonas || []);
+  var n = serie.x.length, x = new Float64Array(n), o = [];
+  for (var i = 0; i < n; i++) { x[i] = serie.x[i] - (g + _interpZona(tab, serie.x[i])) / 1000; o.push(i); }
+  var desord = false; for (var k = 1; k < n; k++) if (x[k] < x[k - 1]) { desord = true; break; }
+  if (!desord) return { x: x, y: serie.y };
+  o.sort(function (a, b) { return x[a] - x[b]; });
+  var X = new Float64Array(n), Y = new Float64Array(n); o.forEach(function (i, k) { X[k] = x[i]; Y[k] = serie.y[i]; });
+  return { x: X, y: Y };
+}
+function _interpZona(tab, x) {
+  if (!tab.length) return 0; if (x <= tab[0][0]) return tab[0][1]; if (x >= tab[tab.length - 1][0]) return tab[tab.length - 1][1];
+  var lo = 0, hi = tab.length - 1; while (hi - lo > 1) { var m = (lo + hi) >> 1; if (tab[m][0] <= x) lo = m; else hi = m; }
+  return tab[lo][1] + (x - tab[lo][0]) / (tab[hi][0] - tab[lo][0]) * (tab[hi][1] - tab[lo][1]);
+}
+function _dentro(det, lim) { return det.length ? det.filter(function (q) { return Math.abs(q.d_m) <= lim; }).length / det.length : 0; }
+
+/* serie: {x, y} de desviación ubicada con el km de partida que se tenga (cargado por el operador o aprobado contra la
+   referencia). progresivas: piquetes de la planilla vigente del recorrido y vía. op.refGlobal_m: corrimiento que da la
+   referencia respecto de esa misma serie (0 si la serie ya viene alineada contra la referencia; null si no hay referencia).
+   op.conReferencia: true si la serie ya viene alineada contra la referencia (se saltea el barrido grueso). */
+function alinearPlanilla(serie, progresivas, opciones) {
+  var op = _opP(opciones), avisos = [], s = serie;
+  // 1. grueso
+  var grueso = 0, barrido = null, ambigua = null;
+  if (!(opciones && opciones.conReferencia)) {
+    var mejor = null; barrido = [];
+    for (var c = -op.grueso_m; c <= op.grueso_m + 1e-9; c += op.gruesoPaso_m) {
+      var cp0 = controlPicos(corregirSerie(serie, c), progresivas, { picoBusca_m: op.gruesoBusca_m, picoAviso_m: 99 });
+      var f = _dentro(cp0.detalle, op.gruesoOk_m); barrido.push([c, +f.toFixed(3)]);
+      if (!mejor || f > mejor.f) mejor = { c: c, f: f };
+    }
+    if (!mejor || mejor.f < 0.3) return { ok: false, global_m: 0, zonas: [], tramos: [], barrido: barrido, avisos: ["No se encontró un corrimiento claro en ±" + op.grueso_m + " m (mejor: " + (mejor ? Math.round(mejor.f * 100) : 0) + " % de piquetes con pico a ≤ " + op.gruesoOk_m + " m). No se alinea: revisar el piquete de inicio y ajustar a mano mirando las curvas."] };
+    grueso = mejor.c; if (Math.abs(grueso) >= op.grueso_m) avisos.push("El corrimiento grueso cae en el borde (±" + op.grueso_m + " m): revisar el piquete de inicio.");
+    // otra ubicación a ≥ 15 m (en general, un vano) que pone casi tantos picos sobre piquetes: el zigzag se repite
+    var seg = null; barrido.forEach(function (q) { if (Math.abs(q[0] - mejor.c) >= op.ambigua_m && (!seg || q[1] > seg[1])) seg = q; });
+    if (seg && seg[1] >= mejor.f * op.ambiguaRel) {
+      ambigua = { otra_m: seg[0], f: seg[1], mejor_f: +mejor.f.toFixed(3) };
+      avisos.push("Ubicación ambigua: corriendo " + (seg[0] - mejor.c).toFixed(0) + " m (un vano) también caen los picos sobre los piquetes (" + Math.round(seg[1] * 100) + " % contra " + Math.round(mejor.f * 100) + " %). Confirmar el piquete de inicio mirando las curvas antes de aprobar.");
+    }
+  }
+  // 2. global (dos pasadas)
+  var antes = controlPicos(serie, progresivas, { picoAviso_m: 99 });
+  var global = grueso, cp;
+  for (var it = 0; it < 2; it++) {
+    cp = controlPicos(corregirSerie(serie, global), progresivas, { picoAviso_m: 99 });
+    if (cp.mediana_m === null) break;
+    global += cp.mediana_m;
+  }
+  global = +global.toFixed(1);
+  // tope (c51): el global no puede alejarse del inicio más que lo que se buscó; si se va, quedarse con el grueso y avisar
+  if (Math.abs(global) > op.grueso_m + op.topeExtra_m) {
+    avisos.push("El ajuste fino se fue a " + global + " m del piquete de inicio (más que ±" + op.grueso_m + " m): se deja el corrimiento grueso (" + grueso + " m). Revisar las curvas.");
+    global = grueso;
+  }
+  cp = controlPicos(corregirSerie(serie, global), progresivas, { picoAviso_m: 99 });
+  if (cp.mediana_m === null) return { ok: false, global_m: 0, zonas: [], avisos: avisos.concat(["Pocos piquetes con pico: no se puede alinear contra la planilla."]), barrido: barrido };
+  // 3. zonas: mediana del residuo en ±zona_km
+  var det = cp.detalle, zonas = [], fuera = [];
+  for (var i = 0; i < det.length; i++) {
+    var w = []; for (var j = 0; j < det.length; j++) if (Math.abs(det[j].km - det[i].km) <= op.zona_km) w.push(det[j].d_m);
+    var z = w.length >= op.zonaMinPiq ? _mediana(w) : 0;
+    if (Math.abs(z) > op.zonaMax_m) { fuera.push(det[i].km); z = 0; }
+    else if (Math.abs(z) < op.zonaUmbral_m) z = 0;
+    zonas.push([+det[i].km.toFixed(5), +z.toFixed(2)]);
+  }
+  // resumen de zonas corregidas (tramos seguidos con corrección ≠ 0 y mismo signo)
+  var tramos = [], t = null;
+  zonas.forEach(function (q) {
+    if (q[1] !== 0 && t && Math.sign(q[1]) === t.signo) { t.hasta = q[0]; t.v.push(q[1]); }
+    else { if (t) tramos.push(t); t = q[1] !== 0 ? { desde: q[0], hasta: q[0], signo: Math.sign(q[1]), v: [q[1]] } : null; }
+  });
+  if (t) tramos.push(t);
+  tramos = tramos.map(function (q) { return { km_desde: +q.desde.toFixed(3), km_hasta: +q.hasta.toFixed(3), correccion_m: +_mediana(q.v).toFixed(1), piquetes: q.v.length }; });
+  if (fuera.length) avisos.push(fuera.length + " piquetes con corrección de zona mayor que ±" + op.zonaMax_m + " m (km " + fuera[0].toFixed(2) + (fuera.length > 1 ? "–" + fuera[fuera.length - 1].toFixed(2) : "") + "): no se corrigen; revisar a mano.");
+  var correccion = { global_m: global, zonas: zonas };
+  // 5. control
+  var despues = controlPicos(corregirSerie(serie, correccion), progresivas, { picoAviso_m: 99 });
+  var dd = _dentro(despues.detalle, op.controlOk_m);
+  if (dd < op.controlMin) avisos.push("Después de alinear, solo el " + Math.round(dd * 100) + " % de los piquetes tiene el pico a ≤ " + op.controlOk_m + " m (lo habitual es 55–85 %; con el km de partida errado da 5–30 %). Revisar el piquete de inicio y las curvas antes de aprobar.");
+  var ref = opciones && opciones.refGlobal_m != null ? opciones.refGlobal_m : null;
+  if (ref !== null && Math.abs(global - ref) > op.difRefAviso_m)
+    avisos.push("Contra la planilla el corrimiento es " + global + " m y contra la referencia " + ref + " m (diferencia " + (global - ref).toFixed(1) + " m). Revisar las curvas antes de aprobar.");
+  return {
+    ok: true, ambigua: ambigua, grueso_m: grueso, global_m: global, zonas: zonas, tramos: tramos, correccion: correccion,
+    control: {
+      piquetes: despues.piquetes,
+      dentro_antes: +(_dentro(antes.detalle, op.controlOk_m) * 100).toFixed(0),
+      dentro_global: +(_dentro(cp.detalle, op.controlOk_m) * 100).toFixed(0),
+      dentro_despues: +(_dentro(despues.detalle, op.controlOk_m) * 100).toFixed(0),
+      mediana_despues_m: despues.mediana_m, ventanas: despues.ventanas
+    },
+    referencia_m: ref, avisos: avisos, barrido: barrido, opciones: op
+  };
+}
+
+/* ===== c51 — Ubicar una pasada: procedimiento completo (Sebastián, 30/10/2026) =====
+   Cada medición arranca donde indica control trenes (cambia en cada medición) y a veces se mide solo una zona. El escáner
+   se para a la altura del piquete que se anota: en los crudos 2024–2026 el inicio real quedó a 0–8 m de ese piquete
+   (un caso de 24,5 m). Probado con crudos reales (alineacion_c51.md §7–8):
+   1) planilla desde el piquete de inicio, búsqueda ±15 m (más chica que medio vano: no puede saltar al poste vecino);
+   2) referencia: si la planilla alineó, CONTROL (avisa si se separan > 6 m; si se separan > 15 m con r ≥ 0,95, la
+      planilla se enganchó a otro poste y manda la referencia); si no alineó (piquete mal anotado), RESCATE: forma del zigzag ±100 m y después planilla desde ahí, con aviso «el piquete de inicio parece mal anotado».
+   Devuelve { ok, rescate, kmPartida (equivalente al global), correccion (para corregirSerie sobre la serie con
+              kmPartidaBase), kmPartidaBase, referencia, planilla, avisos }. */
+var UBICAR = { rangoRef_m: 100, corta_km: 2, difRef_m: 3, saltoVano_m: 15 };   // corta_km: mínimo operativo (Sebastián 30/10/2026: por tramo, > 2 km)
+function ubicarPasada(cd, sentido, kmInicial, ref, progresivas, opciones) {
+  var op = {}; Object.keys(UBICAR).forEach(function (k) { op[k] = (opciones && opciones[k] != null) ? opciones[k] : UBICAR[k]; });
+  var avisos = [], B = null, kmBase = kmInicial, rescate = false;
+  // 1. planilla desde el piquete de inicio (±15 m): el escáner arranca a la altura del piquete anotado
+  var D = alinearPlanilla(serieDesviacion(cd, kmInicial, sentido), progresivas, {});
+  // 2. referencia: control si D alineó; rescate (±100 m) si no (piquete mal anotado)
+  if (ref) {
+    B = alinearPartida(cd, sentido, kmInicial, ref, { rango_m: op.rangoRef_m });
+    if (D.ok && B.ok) {
+      var dif = +((B.kmPartida - (kmInicial - D.global_m / 1000)) * 1000).toFixed(1);   // B − D en el km de partida
+      B.dif_con_planilla_m = dif;
+      // la referencia tiene su propio corrimiento respecto de la planilla (±0–3 m): solo se avisa si se separan más que un poco
+      if (Math.abs(dif) > op.saltoVano_m && B.r >= 0.95 && !B.avisos.some(function (a) { return /ambigua/i.test(a); })) {
+        // más de 15 m de diferencia = la planilla se enganchó a otro poste: manda la forma del zigzag (piquete mal anotado)
+        rescate = true; kmBase = B.kmPartida;
+        avisos.push("El piquete de inicio parece mal anotado: la planilla y la referencia difieren " + dif + " m (un vano). Se usa la referencia; confirmar el piquete de inicio.");
+        D = alinearPlanilla(serieDesviacion(cd, kmBase, sentido), progresivas, { conReferencia: true });
+      } else if (Math.abs(dif) > op.difRef_m + 3) avisos.push("Control: la referencia ubica la pasada " + dif + " m distinto que la planilla. Revisar las curvas (puede ser el piquete de inicio o la referencia).");
+    } else if (!D.ok && B.ok) {
+      rescate = true; kmBase = B.kmPartida;
+      avisos.push("El piquete de inicio parece mal anotado: la referencia ubica la pasada " + B.corrimiento_m + " m más " + (B.corrimiento_m > 0 ? "adelante" : "atrás") + ". Confirmar el piquete de inicio.");
+      D = alinearPlanilla(serieDesviacion(cd, kmBase, sentido), progresivas, { conReferencia: true });
+    }
+  } else avisos.push("Sin referencia para este recorrido y vía: no hay control independiente de la ubicación.");
+  D.avisos.forEach(function (a) { avisos.push("Planilla: " + a); });
+  if (B) B.avisos.forEach(function (a) { avisos.push("Referencia: " + a); });
+  var largo = cd.largo_m / 1000;
+  if (largo < op.corta_km) avisos.push("Medición de " + Math.round(largo * 1000) + " m, menos que el mínimo de " + op.corta_km + " km (se mide por tramo). Mirar las curvas con los piquetes y confirmar el piquete de inicio antes de aprobar.");
+  return { ok: D.ok, rescate: rescate, kmPartidaBase: kmBase, kmPartida: D.ok ? +(kmBase - D.global_m / 1000).toFixed(5) : kmBase,
+           correccion: D.ok ? D.correccion : { global_m: 0, zonas: [] }, referencia: B, planilla: D, avisos: avisos };
+}
+
+if (typeof module !== "undefined") module.exports = { UBICAR: UBICAR, ubicarPasada: ubicarPasada, ALINEAR: ALINEAR, PLANILLA: PLANILLA, leerCrudoDesviacion: leerCrudoDesviacion, serieDesviacion: serieDesviacion,
+  seriesDesviacionInforme: seriesDesviacionInforme, alinearPartida: alinearPartida, controlPicos: controlPicos, curvasComparacion: curvasComparacion,
+  alinearPlanilla: alinearPlanilla, corregirSerie: corregirSerie };
+</script>
 <script>/* js/pantallas/sesion.js */
 /* =====================================================================
  * Pantallas de sesión (tarea c14)
@@ -8266,7 +8676,13 @@ if (typeof module !== "undefined") module.exports = { combinadas: combinadas, el
         'La alerta no se cambia desde la plataforma: un cambio recalcula al instante el estado de todos los vanos. Se decide con la Coordinación y se carga con un script de la base.',
         'Administración → Planilla de piquetes: la vigente y las anteriores, los códigos de piquete que cambiaron, los límites de los tramos y el Excel original para descargar.',
         'Una planilla nueva se carga con la herramienta «Planilla nueva» (fuera de la plataforma), que vuelve a ubicar todas las mediciones.'],
-        ir: ['#/admin/umbrales', 'Ir a Umbrales'] }
+        ir: ['#/admin/umbrales', 'Ir a Umbrales'] },
+      { id: 'referencias', para: 'admin', q: '¿Qué es una referencia de alineación y cómo la marco?', pasos: [   // c51
+        'Es una medición buena de cada recorrido y vía. Cuando se carga una medición desde los crudos, la plataforma la ubica con los picos del zigzag sobre los piquetes de la planilla, y la referencia controla esa ubicación (y la corrige si el piquete de inicio está mal anotado).',
+        'Administración → Referencias de alineación → «Marcar» (o «Cambiar»): elegí el informe de altura y desviación procesado y la columna de la fecha que querés usar. Si el recorrido viene en dos informes, elegí los dos.',
+        'Antes de marcarla, mirá «Picos sobre piquetes»: cerca de 0 m y con más del 55 % de los piquetes a 3 m o menos es una buena referencia. Si avisa «revisar», conviene otra medición.',
+        'No cambia ninguna medición ni el estado de ningún vano. La anterior queda en el historial; para quitar una, hace falta el motivo.'],
+        ir: ['#/admin/referencias', 'Ir a Referencias'] }
     ];
   }
 
@@ -8531,7 +8947,7 @@ if (typeof module !== "undefined") module.exports = { combinadas: combinadas, el
 /* =====================================================================
  * Trabajo (operador) y Administración (admin) — marcadores (tarea c14)
  *   #/trabajo  hub: P10 Carga (c06) · P11 Revisión (c04) · P12 Avisos y zonas (c18, avisos.js)
- *   #/admin    hub: P13 Usuarios · P14 Umbrales · P15 Planilla (c11, c17) · P16 Auditoría (c11) · Uso (c64)
+ *   #/admin    hub: P13 Usuarios · P14 Umbrales · P15 Planilla (c11, c17) · P16 Auditoría (c11) · Uso (c64) · Referencias de alineación (c51)
  * Las rutas exigen sesión; sin sesión llevan a Ingresar y vuelven acá.
  * c04 (10/10/2026): Revisión ya existe (revision.js): acá solo queda su tarjeta, con el contador.
  * c06 (20/10/2026): Carga de medición ya existe (carga.js).
@@ -8551,7 +8967,8 @@ if (typeof module !== "undefined") module.exports = { combinadas: combinadas, el
     { ruta: 'admin/umbrales', titulo: 'Umbrales', tarea: 'c11', texto: 'Nominal, alerta y límite vigentes por sección, con su historial. Solo lectura.', hecha: true },
     { ruta: 'admin/planilla', titulo: 'Planilla de piquetes', tarea: 'c11 · c17', texto: 'Versiones, códigos que cambiaron, límites de los tramos y planilla original. Solo lectura.', hecha: true },
     { ruta: 'admin/auditoria', titulo: 'Auditoría', tarea: 'c11', texto: 'Quién hizo qué y cuándo, con filtros y exportación a Excel. Solo lectura.', hecha: true },
-    { ruta: 'admin/uso', titulo: 'Uso de la plataforma', tarea: 'c64', texto: 'Días de uso por usuario, por perfil y por semana, y pantallas más usadas. Solo lectura.', hecha: true }   // c64: uso.js
+    { ruta: 'admin/uso', titulo: 'Uso de la plataforma', tarea: 'c64', texto: 'Días de uso por usuario, por perfil y por semana, y pantallas más usadas. Solo lectura.', hecha: true },   // c64: uso.js
+    { ruta: 'admin/referencias', titulo: 'Referencias de alineación', tarea: 'c51', texto: 'La medición de control de cada recorrido y vía para ubicar las mediciones que se cargan desde los crudos.', hecha: true }   // c51: referencias.js
   ];
 
   function hub(titulo, sub, items, raiz, pestana) {
@@ -8581,7 +8998,7 @@ if (typeof module !== "undefined") module.exports = { combinadas: combinadas, el
     if (it.hecha) return;  // la pantalla real está en su propio archivo
     Rutas.definir('/' + it.ruta, { pantalla: hoja('Trabajo', '#/trabajo', it), titulo: it.titulo, pestana: 'trabajo', requiere: 'operador' });
   });
-  Rutas.definir('/admin', { pantalla: hub('Administración', 'Usuarios, umbrales, planilla de piquetes, auditoría y uso de la plataforma', ADMIN, 'Administración', 'admin'), titulo: 'Administración', pestana: 'admin', requiere: 'admin' });
+  Rutas.definir('/admin', { pantalla: hub('Administración', 'Usuarios, umbrales, planilla de piquetes, auditoría, uso de la plataforma y referencias de alineación', ADMIN, 'Administración', 'admin'), titulo: 'Administración', pestana: 'admin', requiere: 'admin' });
   ADMIN.forEach(function (it) {
     if (it.hecha) return;  // Usuarios: usuarios.js · Umbrales, Planilla y Auditoría: administracion.js (c11, 26/10/2026)
     Rutas.definir('/' + it.ruta, { pantalla: hoja('Administración', '#/admin', it), titulo: it.titulo, pestana: 'admin', requiere: 'admin' });
@@ -10068,15 +10485,16 @@ if (typeof module !== "undefined") module.exports = { combinadas: combinadas, el
     medicion: 'Mediciones', archivo_fuente: 'Excel registrados', anomalia: 'Revisión', verificacion: 'Calibre',
     evento_hilo: 'Intervenciones', pedido_verificacion: 'Pedidos', descarte_lectura: 'Alarmas descartadas', perfil: 'Usuarios', umbral: 'Umbrales',
     version_piquetes: 'Planilla', limite_tramo: 'Límites de tramos', cambio_seccion: 'Cambio de sección',
-    zona_sin_lectura: 'Zonas sin lectura', aviso: 'Avisos'
+    zona_sin_lectura: 'Zonas sin lectura', aviso: 'Avisos',
+    referencia_alineacion: 'Referencias de alineación', alineacion_medicion: 'Alineación de mediciones'   // c51
   };
   var GRUPOS = [
     { k: '', t: 'Todo' },
-    { k: 'mediciones', t: 'Mediciones y Excel', tablas: ['medicion', 'archivo_fuente'] },
+    { k: 'mediciones', t: 'Mediciones y Excel', tablas: ['medicion', 'archivo_fuente', 'alineacion_medicion'] },
     { k: 'revision', t: 'Revisión de lecturas', tablas: ['anomalia'] },
     { k: 'campo', t: 'En campo (calibre, intervenciones, pedidos)', tablas: ['verificacion', 'evento_hilo', 'pedido_verificacion', 'descarte_lectura'] },
     { k: 'usuarios', t: 'Usuarios', tablas: ['perfil'] },
-    { k: 'config', t: 'Configuración (umbrales, planilla, límites, zonas, avisos)', tablas: ['umbral', 'version_piquetes', 'limite_tramo', 'cambio_seccion', 'zona_sin_lectura', 'aviso'] }
+    { k: 'config', t: 'Configuración (umbrales, planilla, límites, zonas, avisos, referencias)', tablas: ['umbral', 'version_piquetes', 'limite_tramo', 'cambio_seccion', 'zona_sin_lectura', 'aviso', 'referencia_alineacion'] }
   ];
   var CLASIF = { sin_revisar: 'sin revisar', dato_erroneo: 'dato erróneo', real: 'real', verificada_campo: 'verificada en campo' };
   var TIPO_EV = { reemplazo: 'reemplazo de hilo', reparacion_paralelo: 'tramo paralelo', reparacion: 'reparación', cambio_canton: 'cambio de cantón', otro: 'otra intervención' };
@@ -10344,6 +10762,19 @@ if (typeof module !== "undefined") module.exports = { combinadas: combinadas, el
     if (t === 'limite_tramo') return (op === 'INSERT' ? 'Cargó' : op === 'DELETE' ? 'Borró' : 'Modificó') + ' el límite del tramo ' + r.tramo + ' (' + (r.recorrido || '') + ' · ' + UI.nombreVia(r.via || '') + ': ' + (r.piquete_desde || '') + ' → ' + (r.piquete_hasta || '') + ').';
     if (t === 'cambio_seccion') return (op === 'INSERT' ? 'Cargó' : op === 'DELETE' ? 'Borró' : 'Modificó') + ' un cambio de sección ' + r.de_seccion + ' → ' + r.a_seccion + ' mm² (' + (r.recorrido || '') + ' · ' + UI.nombreVia(r.via || '') + ', ' + UI.km(r.km) + ').';
     if (t === 'zona_sin_lectura') return (op === 'INSERT' ? 'Cargó' : op === 'DELETE' ? 'Borró' : 'Modificó') + ' una zona sin lectura (' + (r.recorrido || '') + ', km ' + UI.num(r.km_desde, 3) + ' a ' + UI.num(r.km_hasta, 3) + ').';
+    if (t === 'referencia_alineacion') {   // c51
+      var rf = 'la referencia de alineación de ' + (r.recorrido || '') + ' · ' + UI.nombreVia(r.via || '') + ' (medición del ' + UI.fecha(r.fecha) + ')';
+      if (op === 'INSERT') return 'Marcó ' + rf + (r.nota ? '. Nota: «' + r.nota + '»' : '') + '.';
+      if (cambio('vigente') && !r.vigente) return (r.reemplazada_por || /^Reemplazada/.test(r.motivo_baja || '') ? 'Reemplazó ' : 'Quitó ') + rf + '. Motivo: «' + (r.motivo_baja || '') + '».';
+      if (cambio('reemplazada_por')) return 'Anotó que ' + rf + ' se reemplazó por la N° ' + r.reemplazada_por + '.';
+      return 'Modificó ' + rf + ': ' + campos.join(', ') + '.';
+    }
+    if (t === 'alineacion_medicion') {   // c51
+      var am = 'la alineación de la medición N° ' + r.medicion_id;
+      if (op === 'INSERT') return 'Aprobó ' + am + ' (corrimiento ' + UI.num(r.corrimiento_m, 1) + ' m' + (r.piquete_inicio ? ', inicio en ' + r.piquete_inicio : '') + (r.ajustado_a_mano ? ', ajustada a mano' : '') + (r.rescate ? ', piquete de inicio corregido con la referencia' : '') + ').';
+      if (op === 'DELETE') return 'Se rehízo ' + am + ' (borrador).';
+      return 'Modificó ' + am + ': ' + campos.join(', ') + '.';
+    }
     if (t === 'aviso') return (op === 'INSERT' ? 'Cargó' : op === 'DELETE' ? 'Borró' : 'Modificó') + ' un aviso' + (r.texto ? ': «' + r.texto + '»' : '') + '.';
     return op + ' en ' + t + id + '.';
   }
@@ -11053,6 +11484,360 @@ if (typeof module !== "undefined") module.exports = { combinadas: combinadas, el
   Rutas.definir('/avisos', { pantalla: pantalla, titulo: 'Avisos y zonas sin lectura', pestana: 'trabajo', requiere: 'operador' });
 })(window);
 </script>
+<script>/* js/pantallas/referencias.js */
+/* =====================================================================
+ * Administración → Referencias de alineación (tarea c51, 17/11/2026) — solo administradores
+ *   #/admin/referencias   una referencia vigente por recorrido y vía, historial, marcar, cambiar y quitar
+ *
+ * Qué es (alineacion_c51.md §6–8; decisiones de Sebastián del 26 y 30/10/2026):
+ * - Las mediciones que se carguen desde los crudos del Geismar se ubican llevando los picos del zigzag (desviación del
+ *   hilo) sobre los piquetes de la planilla vigente. La REFERENCIA es una medición buena de ese recorrido y vía: sirve de
+ *   CONTROL de la ubicación y rescata la pasada si el piquete de inicio está mal anotado. No es la verdad: la planilla manda.
+ * - El administrador sube el (o los) informe(s) de altura y desviación procesados, elige la columna «Desv LC dd-mm-aaaa»
+ *   de cada uno y la plataforma muestra el control de picos sobre piquetes de la planilla vigente antes de marcarla.
+ *   Cuando el recorrido viene en dos informes (5-15-19: AV-BZ + BZ-LP), se suben los dos y se unen (corte en la mitad
+ *   de la parte común).
+ * - La serie se guarda comprimida en Storage (carpeta «referencias», solo operadores y administradores la leen); la base
+ *   guarda de qué archivo y columna salió, el control y quién la marcó (script 21: marcar_referencia, quitar_referencia).
+ * - Una referencia no se edita: se reemplaza por otra (la anterior queda en el historial) o se quita, con motivo.
+ * - Nada de esto cambia mediciones ni estados. El camino «desde crudos» de la Carga de medición (paso 3 de c51) la usa.
+ * Todo se arma con UI.h() (texto, nunca HTML con datos de la base).
+ * ===================================================================== */
+(function (global) {
+  'use strict';
+  var h = UI.h;
+  var XLSX_SRC = 'vendor/xlsx.full.min.js', ALIN_SRC = '../importador/alinear.js';
+  var ORD_VIA = ['V1', 'V2', 'V3', 'V4', 'ASC', 'DESC'];
+  var AVISO_M = 3, DENTRO_MIN = 40, DENTRO_ERROR = 25, DESDE = '2024-01-01', NOTA_MAX = 500;
+
+  function errorBase(x) { return String(x || '').replace(/^.*?ERROR:\s*/, ''); }
+  function poner(el, hijos) { el.replaceChildren(); [].concat(hijos).forEach(function add(c) { if (Array.isArray(c)) c.forEach(add); else if (c) el.appendChild(c); }); }
+  function esperar() { return new Promise(function (r) { setTimeout(r, 0); }); }
+  function hora(iso) { var d = new Date(iso); return ('0' + d.getHours()).slice(-2) + ':' + ('0' + d.getMinutes()).slice(-2); }
+  function fechaHora(iso) { return iso ? UI.fecha(iso) + ' ' + hora(iso) : '—'; }
+  function viaTxt(v) { return UI.nombreVia(v); }
+  function signo(v) { return v == null ? '—' : (v > 0 ? '+' : '') + UI.num(v, 1) + ' m'; }
+  async function huella(datos) {
+    if (!global.crypto || !crypto.subtle) throw new Error('Este navegador no permite calcular huellas. Usá Chrome o Edge actualizados.');
+    var buf = typeof datos === 'string' ? new TextEncoder().encode(datos) : datos;
+    var d = await crypto.subtle.digest('SHA-256', buf);
+    return Array.from(new Uint8Array(d)).map(function (b) { return b.toString(16).padStart(2, '0'); }).join('');
+  }
+  async function gzip(texto) {
+    var s = new Blob([texto]).stream().pipeThrough(new CompressionStream('gzip'));
+    return new Uint8Array(await new Response(s).arrayBuffer());
+  }
+
+  // Control de picos sobre piquetes (importador/alinear.js, el mismo de la alineación de c51)
+  function control(serie, progresivas) {
+    var cp = global.controlPicos(serie, progresivas);
+    var den = cp.detalle.length ? cp.detalle.filter(function (q) { return Math.abs(q.d_m) <= AVISO_M; }).length / cp.detalle.length : 0;
+    return { piquetes: cp.piquetes, mediana_m: cp.mediana_m, dentro_3m: Math.round(den * 100),
+             ventanas: cp.ventanas.length, ventanas_fuera: cp.ventanas.filter(function (v) { return Math.abs(v.mediana_m) > AVISO_M; }) };
+  }
+  function avisosControl(c) {
+    var a = [];
+    if (c.piquetes < 20) a.push('Solo ' + c.piquetes + ' piquetes con lectura: el control no es confiable.');
+    if (c.mediana_m != null && Math.abs(c.mediana_m) > AVISO_M) a.push('Los picos caen en promedio ' + signo(c.mediana_m) + ' de los piquetes (más de ±' + AVISO_M + ' m): la medición está corrida respecto de la planilla. Conviene otra referencia.');
+    if (c.dentro_3m < DENTRO_MIN) a.push('Solo el ' + c.dentro_3m + ' % de los piquetes tiene el pico a 3 m o menos (bien ubicada da 55–85 %).');
+    if (c.ventanas_fuera.length) a.push(c.ventanas_fuera.length + ' de ' + c.ventanas + ' tramos de 2 km con los picos a más de ±' + AVISO_M + ' m: ' +
+      c.ventanas_fuera.slice(0, 5).map(function (v) { return 'km ' + v.km_desde + '–' + v.km_hasta + ' (' + signo(v.mediana_m) + ')'; }).join(', ') + (c.ventanas_fuera.length > 5 ? '…' : '') + '.');
+    return a;
+  }
+  function textoControl(c) {
+    if (!c) return '—';
+    return 'mediana ' + signo(c.mediana_m) + ' · ' + c.dentro_3m + ' % a ≤ 3 m · ' + c.piquetes + ' piquetes';
+  }
+
+  // Códigos de la columna «Piq» del informe (los piquetes de la planilla con que se procesó)
+  function piquetesInforme(df) {
+    var c = (df[0] || []).findIndex(function (t) { return /^\s*piq\s*$/i.test(String(t || '')); }), out = {};
+    if (c < 0) return null;
+    for (var f = 1; f < df.length; f++) { var v = df[f] && df[f][c]; if (typeof v === 'string' && /^\d+(-\d+)+$/.test(v.trim())) out[v.trim()] = 1; }
+    return Object.keys(out);
+  }
+  function viaDelInforme(piq, cods, rec, via) {
+    if (!cods || cods.length < 20) return { aviso: 'no trae la columna de piquetes: no se pudo confirmar que sea de ' + viaTxt(via).toLowerCase() + '.' };
+    var porVia = {};
+    piq.forEach(function (p) { if (p.recorrido === rec) { (porVia[p.via] = porVia[p.via] || {})[p.codigo] = 1; } });
+    function parte(v) { var m = porVia[v] || {}; return cods.filter(function (c) { return m[c]; }).length / cods.length; }
+    var esta = parte(via), mejor = null;
+    Object.keys(porVia).forEach(function (v) { if (v !== via) { var q = parte(v); if (!mejor || q > mejor.q) mejor = { v: v, q: q }; } });
+    if (mejor && mejor.q > esta + 0.2) return { otra: 'sus piquetes son de ' + viaTxt(mejor.v).toLowerCase() + ' (' + Math.round(mejor.q * 100) + ' % contra ' + Math.round(esta * 100) + ' % de ' + viaTxt(via).toLowerCase() + '). Elegí el informe de esta vía.' };
+    if (esta < 0.5) return { aviso: 'solo el ' + Math.round(esta * 100) + ' % de sus piquetes está en ' + viaTxt(via).toLowerCase() + ' de la planilla vigente.' };
+    return {};
+  }
+
+  // Une las series elegidas (ordenadas por km). En la parte común de dos informes, corta en la mitad.
+  function unir(partes) {
+    var ps = partes.slice().sort(function (a, b) { return a.s.km_desde - b.s.km_desde; }), x = [], y = [], huecos = [];
+    ps.forEach(function (p, i) {
+      var desde = i === 0 ? -Infinity : p.corteIni, hasta = i === ps.length - 1 ? Infinity : null;
+      if (i < ps.length - 1) {
+        var q = ps[i + 1], fin = p.s.km_hasta, ini = q.s.km_desde;
+        if (ini < fin) { hasta = (ini + fin) / 2; q.corteIni = hasta; }
+        else { hasta = Infinity; q.corteIni = -Infinity; if (ini - fin > 0.5) huecos.push([fin, ini]); }
+      }
+      var n0 = x.length;
+      for (var k = 0; k < p.s.x.length; k++) {
+        var xv = p.s.x[k]; if (xv < desde || xv >= hasta) continue;
+        if (x.length && xv <= x[x.length - 1]) continue;
+        x.push(xv); y.push(p.s.y[k]);
+      }
+      p.usado = x.length > n0 ? [x[n0], x[x.length - 1]] : null;
+    });
+    return { x: x, y: y, partes: ps, huecos: huecos };
+  }
+
+  async function pantalla(ctx) {
+    ctx.miga([{ texto: 'Administración', ruta: '#/admin' }, { texto: 'Referencias de alineación' }]);
+    var sub = 'La medición de control de cada recorrido y vía para ubicar las mediciones que se cargan desde los crudos del Geismar.';
+    ctx.el.replaceChildren(UI.encabezado('Referencias de alineación', sub), h('div', { class: 'cargando' }, 'Leyendo las referencias…'));
+    var D = await leer();
+    if (!ctx.vigente()) return;
+    if (D.error) { ctx.el.replaceChildren(UI.encabezado('Referencias de alineación', sub), UI.mensaje('error', D.error)); return; }
+
+    var zonaForm = h('div');
+    var explica = h('div', { class: 'que-hacer', style: '--c: var(--celeste-ink, #12384d)' },
+      h('b', null, 'Para qué sirve. '),
+      'Al cargar una medición desde los crudos, la plataforma la ubica poniendo los picos del zigzag del hilo (la desviación) sobre los piquetes de la planilla vigente. ',
+      'La referencia es una medición buena del mismo recorrido y vía: controla esa ubicación y la corrige si el piquete de inicio está mal anotado. ',
+      'Conviene una por recorrido y vía, desde 2024, con los picos cerca de 0 m de los piquetes. Marcarla, cambiarla o quitarla no cambia ninguna medición ni el estado de ningún vano.');
+
+    // ---------- vigentes, una fila por recorrido y vía de la planilla vigente ----------
+    var porClave = {}; D.refs.forEach(function (r) { if (r.vigente) porClave[r.recorrido + '|' + r.via] = r; });
+    var huerfanas = D.refs.filter(function (r) { return r.vigente && !D.claves.some(function (k) { return k.rec === r.recorrido && k.via === r.via; }); });
+    var sinRef = D.claves.filter(function (k) { return !porClave[k.rec + '|' + k.via]; }).length;
+    var filas = D.claves.map(function (k) {
+      var r = porClave[k.rec + '|' + k.via], celdaAcc = h('td', { class: 'acc' }), detalle = h('tr', { hidden: true }, h('td', { colspan: 6 }));
+      var btM = h('button', { class: 'btn chico sec', type: 'button' }, r ? 'Cambiar' : 'Marcar');
+      btM.addEventListener('click', function () { abrirMarcar(k.rec, k.via, r); });
+      celdaAcc.appendChild(btM);
+      if (r) {
+        var btQ = h('button', { class: 'btn chico lnk', type: 'button' }, 'Quitar');
+        btQ.addEventListener('click', function () { formQuitar(r, detalle); });
+        celdaAcc.appendChild(btQ);
+      }
+      var avs = r && r.control ? avisosControl(r.control) : [];
+      var fila = h('tr', null,
+        h('td', null, k.rec), h('td', null, viaTxt(k.via)),
+        h('td', null, r ? h('span', null, h('b', null, UI.fecha(r.fecha)), r.medicion_id ? null : h('span', { class: 'nota' }, ' (no está cargada en la plataforma)'))
+                        : h('span', { class: 'chip flag' }, 'Sin referencia')),
+        h('td', null, r ? r.partes.map(function (p) { return h('div', { class: 'nota' }, p.archivo + ' · ' + p.rotulo); }) : null),
+        h('td', null, r ? h('span', null, textoControl(r.control), avs.length ? h('span', { class: 'chip flag', title: avs.join(' ') }, ' revisar') : null) : null),
+        h('td', null, r ? h('span', { class: 'nota' }, (D.quien(r.marcada_por) || '—') + ' · ' + fechaHora(r.marcada_en)) : null),
+        celdaAcc);
+      return [fila, detalle];
+    });
+    var tabla = h('div', { class: 'tabla-cont' }, h('table', { class: 'tabla' },
+      h('thead', null, h('tr', null, ['Recorrido', 'Vía', 'Referencia', 'De dónde sale', 'Picos sobre piquetes', 'Marcó', ''].map(function (t) { return h('th', null, t); }))),
+      h('tbody', null, filas)));
+    var cardVig = UI.card('Referencias vigentes', D.claves.length - sinRef + ' de ' + D.claves.length + ' recorridos y vías', tabla,
+      huerfanas.length ? UI.mensaje('error', huerfanas.length + ' referencia' + (huerfanas.length === 1 ? '' : 's') + ' vigente' + (huerfanas.length === 1 ? ' es' : 's son') +
+        ' de un recorrido o vía que no está en la planilla vigente (' + huerfanas.map(function (r) { return r.recorrido + ' · ' + viaTxt(r.via); }).join('; ') + '). Quitala y marcá la del nombre nuevo.') : null,
+      h('p', { class: 'nota', style: 'margin:8px 0 0' }, 'Planilla vigente: ' + D.vp.archivo + '. Picos sobre piquetes: distancia mediana entre el pico de la desviación y el piquete; «a ≤ 3 m» es el porcentaje de piquetes con el pico a 3 m o menos. Sin referencia, las mediciones de ese recorrido y vía se ubican solo con la planilla (aguanta ±15 m de error en el piquete de inicio).'));
+    huerfanas.forEach(function (r) {
+      var b = h('button', { class: 'btn chico lnk', type: 'button' }, 'Quitar ' + r.recorrido + ' · ' + viaTxt(r.via)), d = h('div');
+      b.addEventListener('click', function () { formQuitar(r, null, d); });
+      cardVig.appendChild(h('div', null, b, d));
+    });
+
+    // ---------- historial ----------
+    var hist = D.refs.filter(function (r) { return !r.vigente; });
+    var cardHist = UI.card('Historial', hist.length ? hist.length + ' reemplazada' + (hist.length === 1 ? '' : 's') + ' o quitada' + (hist.length === 1 ? '' : 's') : 'vacío',
+      hist.length ? h('div', { class: 'tabla-cont' }, h('table', { class: 'tabla' },
+        h('thead', null, h('tr', null, ['Recorrido', 'Vía', 'Referencia', 'Marcó', 'Dejó de usarse', 'Motivo'].map(function (t) { return h('th', null, t); }))),
+        h('tbody', null, hist.map(function (r) {
+          return h('tr', null, h('td', null, r.recorrido), h('td', null, viaTxt(r.via)), h('td', null, UI.fecha(r.fecha)),
+            h('td', null, (D.quien(r.marcada_por) || '—') + ' · ' + fechaHora(r.marcada_en)), h('td', null, (D.quien(r.dejo_por) || '—') + ' · ' + fechaHora(r.dejo_en)),
+            h('td', null, r.motivo_baja || ''));
+        })))) : h('p', { class: 'nota' }, 'Cuando una referencia se reemplaza o se quita, queda acá. Las mediciones ya cargadas conservan la referencia con que se alinearon.'));
+
+    ctx.el.replaceChildren(UI.encabezado('Referencias de alineación', sub), explica, zonaForm, cardVig, cardHist);
+
+    // ---------- quitar ----------
+    function formQuitar(r, filaDet, cont) {
+      var el = cont || filaDet.firstChild; if (filaDet) filaDet.hidden = false;
+      var inM = h('textarea', { id: 'rf-motivo', maxlength: '500', placeholder: 'Ej.: la medición resultó corrida; se va a marcar la del próximo recorrido.' });
+      var msg = h('div', { role: 'status' }), bt = h('button', { class: 'btn peligro', type: 'button' }, 'Quitar la referencia'), bc = h('button', { class: 'btn lnk', type: 'button' }, 'Cancelar');
+      bc.addEventListener('click', function () { el.replaceChildren(); if (filaDet) filaDet.hidden = true; });
+      bt.addEventListener('click', async function () {
+        if (inM.value.trim().length < 5) { poner(msg, UI.mensaje('error', 'Escribí el motivo.')); return; }
+        bt.disabled = true;
+        var rr = await Conexion.rpc('quitar_referencia', { p_id: r.id, p_motivo: inM.value.trim() });
+        if (rr.error) { bt.disabled = false; poner(msg, UI.mensaje('error', 'No se pudo quitar: ' + errorBase(rr.error))); return; }
+        UI.toast('Referencia quitada: ' + r.recorrido + ' · ' + viaTxt(r.via) + ' queda sin referencia.');
+        pantalla(ctx);
+      });
+      poner(el, h('div', { class: 'rf-quitar' },
+        h('p', { class: 'nota' }, 'Sin referencia, las mediciones de ' + r.recorrido + ' · ' + viaTxt(r.via) + ' se ubican solo con la planilla (aguanta ±15 m de error en el piquete de inicio). Queda en el historial.'),
+        h('label', { class: 'campo', for: 'rf-motivo' }, 'Motivo'), inM, h('div', { class: 'acciones' }, bt, bc), msg));
+      inM.focus();
+    }
+
+    // ---------- marcar o cambiar ----------
+    function abrirMarcar(rec, via, actual) {
+      var S = { archivos: [], corriendo: false };
+      var inF = h('input', { type: 'file', accept: '.xlsx', multiple: true, id: 'rf-inf' });
+      var lista = h('div'), resumen = h('div'), msg = h('div', { role: 'status', class: 'cg-msg' });
+      var inNota = h('textarea', { id: 'rf-nota', maxlength: String(NOTA_MAX), placeholder: 'Opcional. Ej.: primera medición de 2025 con los picos sobre los piquetes en toda la pasada.' });
+      var btMarcar = h('button', { class: 'btn', type: 'button', disabled: true }, actual ? 'Marcar como referencia (reemplaza a la del ' + UI.fecha(actual.fecha) + ')' : 'Marcar como referencia');
+      var btCerrar = h('button', { class: 'btn lnk', type: 'button' }, 'Cancelar');
+      btCerrar.addEventListener('click', function () { zonaForm.replaceChildren(); });
+      var card = UI.card((actual ? 'Cambiar la referencia · ' : 'Marcar la referencia · ') + rec + ' · ' + viaTxt(via), actual ? 'vigente: ' + UI.fecha(actual.fecha) : null,
+        h('p', { class: 'nota' }, 'Elegí el informe de altura y desviación procesado («Informe Altura y Desviacion …xlsx», con la hoja «Datos Filtrado»). Si el recorrido viene en dos informes (por ejemplo AV-BZ y BZ-LP), elegí los dos. La plataforma los lee en esta computadora; no se sube el Excel, solo la serie de desviación.'),
+        h('label', { class: 'campo', for: 'rf-inf' }, 'Informe(s) de altura y desviación', inF),
+        lista, msg, resumen,
+        h('label', { class: 'campo', for: 'rf-nota' }, 'Nota (opcional)'), inNota,
+        h('div', { class: 'acciones' }, btMarcar, btCerrar));
+      zonaForm.replaceChildren(card);
+      card.scrollIntoView({ block: 'start' });
+
+      inF.addEventListener('change', async function () {
+        var fs = Array.from(inF.files); inF.value = '';
+        if (!fs.length) return;
+        S.corriendo = true; btMarcar.disabled = true;
+        try {
+          await UI.cargarScript(XLSX_SRC, 'XLSX'); await UI.cargarScript(ALIN_SRC, 'seriesDesviacionInforme');
+          if (!S.prog) {
+            S.prog = D.piq.filter(function (p) { return p.recorrido === rec && p.via === via && p.progresiva != null; }).map(function (p) { return +p.progresiva; });
+            S.kmPlan = [Math.min.apply(null, S.prog), Math.max.apply(null, S.prog)];
+          }
+          for (var i = 0; i < fs.length; i++) {
+            var f = fs[i];
+            if (S.archivos.some(function (a) { return a.nombre === f.name && a.bytes === f.size; })) continue;
+            poner(msg, h('div', { class: 'cargando' }, 'Leyendo ' + f.name + ' (' + UI.num(f.size / 1048576, 0) + ' MB; puede tardar unos segundos)…'));
+            await esperar();
+            var buf = await f.arrayBuffer(), hh = await huella(buf);
+            if (S.archivos.some(function (a) { return a.huella === hh; })) continue;
+            var wb = global.XLSX.read(buf, { type: 'array', sheets: ['Datos Filtrado'], cellStyles: false, cellHTML: false, cellFormula: false });
+            var ws = wb.Sheets['Datos Filtrado'];
+            if (!ws) throw new Error(f.name + ' no tiene la hoja «Datos Filtrado»: no parece un informe de altura y desviación.');
+            var df = global.XLSX.utils.sheet_to_json(ws, { header: 1, raw: true, defval: null });
+            var series = global.seriesDesviacionInforme(df);
+            if (!series.length) throw new Error(f.name + ' no trae columnas «Desv LC dd-mm-aaaa» con progresiva. ¿Es el informe de desgaste? Hace falta el de altura y desviación.');
+            series.forEach(function (s) { s.ctl = control(s, S.prog); });
+            var nueva = series.slice().sort(function (a, b) { return String(b.fecha || '').localeCompare(String(a.fecha || '')); })[0];
+            S.archivos.push({ nombre: f.name, bytes: f.size, huella: hh, series: series, elegida: series.indexOf(nueva), piqs: piquetesInforme(df) });
+          }
+          poner(msg, null);
+        } catch (e) { poner(msg, UI.mensaje('error', (e && e.message) || String(e))); }
+        S.corriendo = false; pintar();
+      });
+
+      function pintar() {
+        poner(lista, S.archivos.map(function (a, i) {
+          var q = h('button', { class: 'btn lnk', type: 'button' }, 'Quitar');
+          q.addEventListener('click', function () { S.archivos.splice(i, 1); pintar(); });
+          return h('div', { class: 'card rf-arch' },
+            h('div', null, h('b', { class: 'mono' }, a.nombre), ' ', q),
+            h('div', { role: 'radiogroup', 'aria-label': 'Columna de ' + a.nombre }, a.series.map(function (s, j) {
+              var id = 'rf-c-' + i + '-' + j, rb = h('input', { type: 'radio', name: 'rf-col-' + i, id: id, value: String(j) });
+              rb.checked = j === a.elegida;
+              rb.addEventListener('change', function () { a.elegida = j; pintar(); });
+              var av = avisosControl(s.ctl);
+              return h('div', { class: 'rf-col' }, rb, ' ', h('label', { for: id }, h('b', null, s.rotulo), ' · km ' + UI.num(s.km_desde, 3) + '–' + UI.num(s.km_hasta, 3) + ' · ' +
+                s.x.length.toLocaleString('es-AR') + ' lecturas · picos: ' + textoControl(s.ctl)), av.length ? h('span', { class: 'chip flag', title: av.join(' ') }, ' revisar') : null);
+            })));
+        }));
+        evaluar();
+      }
+
+      function evaluar() {
+        S.listo = null; btMarcar.disabled = true;
+        if (!S.archivos.length) { poner(resumen, null); return; }
+        var partes = S.archivos.map(function (a) { return { a: a, s: a.series[a.elegida] }; }), errores = [], avisos = [];
+        var fechas = partes.map(function (p) { return p.s.fecha; }).filter(function (v, i, l) { return l.indexOf(v) === i; });
+        if (fechas.length !== 1 || !fechas[0]) errores.push('Las columnas elegidas son de fechas distintas (' + fechas.map(function (f) { return f ? UI.fecha(f) : 'sin fecha'; }).join(', ') + '): una referencia es una sola medición.');
+        var fe = fechas[0];
+        if (fe && fe < DESDE) errores.push('Se trabaja con mediciones desde 2024 (decisión del 26/10/2026): elegí una del ' + UI.fecha(DESDE) + ' en adelante.');
+        if (fe && fe > UI.hoyISO()) errores.push('La fecha de la columna (' + UI.fecha(fe) + ') es posterior a hoy.');
+        if (actual && fe === actual.fecha) avisos.push('Es la misma fecha de la referencia vigente: se reemplaza solo si la serie es distinta (otro informe u otra columna).');
+        var U = unir(partes);
+        var enPlan = U.x.filter(function (x) { return x >= S.kmPlan[0] && x <= S.kmPlan[1]; }).length / Math.max(1, U.x.length);
+        if (enPlan < 0.5) errores.push('Solo el ' + Math.round(enPlan * 100) + ' % de la serie cae entre los piquetes de ' + rec + ' · ' + viaTxt(via) + ' (km ' + UI.num(S.kmPlan[0], 3) + '–' + UI.num(S.kmPlan[1], 3) + '): ¿es el informe de otro recorrido o vía?');
+        // vía: los piquetes del informe (columna «Piq») tienen que ser de esta vía, no de otra del mismo recorrido
+        // (el control de picos no distingue vías: los postes de las dos vías están casi a la misma progresiva)
+        S.archivos.forEach(function (a) {
+          var v = viaDelInforme(D.piq, a.piqs, rec, via);
+          if (v.otra) errores.push(a.nombre + ': ' + v.otra);
+          else if (v.aviso) avisos.push(a.nombre + ': ' + v.aviso);
+        });
+        U.huecos.forEach(function (g) { avisos.push('Hueco sin serie entre km ' + UI.num(g[0], 3) + ' y ' + UI.num(g[1], 3) + ': ahí no hay referencia.'); });
+        var ctl = U.x.length > 1000 ? control({ x: U.x, y: U.y }, S.prog) : null;
+        if (ctl) avisos = avisos.concat(avisosControl(ctl));
+        if (ctl && ctl.piquetes < 20) errores.push('Casi ningún piquete de la planilla cae en la serie: revisá el recorrido y la vía.');
+        else if (ctl && ctl.dentro_3m < DENTRO_ERROR) errores.push('Solo el ' + ctl.dentro_3m + ' % de los piquetes tiene el pico a 3 m o menos: la serie no corresponde a ' + rec + ' · ' + viaTxt(via) + ' o está muy corrida. No sirve como referencia.');
+        var kp = [U.x[0], U.x[U.x.length - 1]];
+        poner(resumen, h('div', { class: 'rf-res' },
+          h('div', { class: 'kpis' },
+            h('div', { class: 'kpi' }, h('small', null, 'Medición'), h('b', null, fe ? UI.fecha(fe) : '—'), h('span', { class: 'kd' }, partes.length === 1 ? '1 informe' : partes.length + ' informes unidos')),
+            h('div', { class: 'kpi' }, h('small', null, 'Cubre'), h('b', null, U.x.length ? 'km ' + UI.num(kp[0], 3) + '–' + UI.num(kp[1], 3) : '—'), h('span', { class: 'kd' }, U.x.length.toLocaleString('es-AR') + ' lecturas')),
+            h('div', { class: 'kpi' + (ctl && Math.abs(ctl.mediana_m) > AVISO_M ? ' alerta' : '') }, h('small', null, 'Picos sobre piquetes'), h('b', null, ctl ? signo(ctl.mediana_m) : '—'),
+              h('span', { class: 'kd' }, ctl ? ctl.dentro_3m + ' % a ≤ 3 m · ' + ctl.piquetes + ' piquetes' : ''))),
+          partes.length > 1 ? h('p', { class: 'nota' }, 'Unión: ' + U.partes.map(function (p) { return p.a.nombre + (p.usado ? ' (km ' + UI.num(p.usado[0], 3) + '–' + UI.num(p.usado[1], 3) + ')' : ' (no aporta)'); }).join(' + ') + '. En la parte común se corta en la mitad.') : null,
+          errores.map(function (t) { return UI.mensaje('error', t); }),
+          avisos.length ? h('ul', { class: 'cg-lista' }, avisos.map(function (t) { return h('li', null, t); })) : (ctl ? UI.mensaje('ok', 'Los picos caen sobre los piquetes de la planilla vigente: sirve como referencia.') : null)));
+        if (errores.length || !ctl || S.corriendo) return;
+        S.listo = { fecha: fe, U: U, ctl: ctl };
+        btMarcar.disabled = false;
+      }
+
+      btMarcar.addEventListener('click', async function () {
+        var L = S.listo; if (!L) return;
+        if (inNota.value.length > NOTA_MAX) { poner(msg, UI.mensaje('error', 'La nota no puede pasar de ' + NOTA_MAX + ' caracteres.')); return; }
+        btMarcar.disabled = true; btCerrar.disabled = true;
+        try {
+          poner(msg, h('div', { class: 'cargando' }, 'Preparando la serie…'));
+          var partes = L.U.partes.filter(function (p) { return p.usado; }).map(function (p) {
+            return { archivo: p.a.nombre, huella: p.a.huella, columna: p.s.columna, rotulo: p.s.rotulo, km_desde: +p.s.km_desde.toFixed(5), km_hasta: +p.s.km_hasta.toFixed(5),
+                     usado_desde: +p.usado[0].toFixed(5), usado_hasta: +p.usado[1].toFixed(5), puntos: p.s.x.length, control: p.s.ctl };
+          });
+          var serie = { formato: 'referencia_desviacion', version: 1, recorrido: rec, via: via, fecha: L.fecha, partes: partes.map(function (p) { return { archivo: p.archivo, huella: p.huella, rotulo: p.rotulo }; }),
+                        x: L.U.x.map(function (v) { return +v.toFixed(5); }), y: L.U.y.map(function (v) { return +(+v).toFixed(1); }) };
+          var texto = JSON.stringify(serie), hs = await huella(texto), gz = await gzip(texto);
+          poner(msg, h('div', { class: 'cargando' }, 'Subiendo la serie (' + UI.num(gz.length / 1048576, 1) + ' MB)…'));
+          // como la carga de mediciones (carga_base.js): bytes, no Blob (con Blob la librería manda un formulario); ya subida = sigue
+          var up = await Conexion.cliente.storage.from('referencias').upload(hs + '.json.gz', gz, { contentType: 'application/gzip', upsert: false });
+          if (up.error && !(String(up.error.statusCode || '') === '409' || /exist|duplicate/i.test(up.error.message || ''))) throw new Error('No se pudo subir la serie: ' + (up.error.message || up.error));
+          poner(msg, h('div', { class: 'cargando' }, 'Marcando la referencia…'));
+          var ctlG = { piquetes: L.ctl.piquetes, mediana_m: L.ctl.mediana_m, dentro_3m: L.ctl.dentro_3m, ventanas: L.ctl.ventanas, ventanas_fuera: L.ctl.ventanas_fuera };
+          var rr = await Conexion.rpc('marcar_referencia', { p: { recorrido: rec, via: via, fecha: L.fecha, origen: 'informe', partes: partes, km_desde: +serie.x[0].toFixed(5),
+            km_hasta: +serie.x[serie.x.length - 1].toFixed(5), puntos: serie.x.length, huella_serie: hs, control: ctlG, nota: inNota.value.trim() } });
+          if (rr.error) throw new Error(errorBase(rr.error));
+          UI.toast('Referencia marcada: ' + rec + ' · ' + viaTxt(via) + ', medición del ' + UI.fecha(L.fecha) + '.');
+          pantalla(ctx);
+        } catch (e) {
+          poner(msg, UI.mensaje('error', (e && e.message) || String(e)));
+          btMarcar.disabled = false; btCerrar.disabled = false;
+        }
+      });
+    }
+  }
+
+  async function leer() {
+    var rv = await Conexion.leer('version_piquetes', { columnas: 'id, archivo, fecha', filtros: [['eq', 'vigente', true]] });
+    if (rv.error) return { error: rv.error };
+    var vp = (rv.datos || [])[0];
+    if (!vp) return { error: 'No hay planilla de piquetes vigente.' };
+    var rs = await Promise.all([
+      Conexion.leerTodo('piquete', { columnas: 'id, recorrido, via, codigo, progresiva', filtros: [['eq', 'version_id', vp.id]] }),
+      Conexion.leer('referencia_alineacion', { columnas: 'id, recorrido, via, fecha, origen, partes, km_desde, km_hasta, puntos, control, medicion_id, nota, vigente, marcada_por, marcada_en, dejo_por, dejo_en, motivo_baja, reemplazada_por', orden: ['marcada_en', false] }),
+      Conexion.leer('perfil', { columnas: 'id, nombre' })
+    ]);
+    var e = rs.map(function (r) { return r.error; }).filter(Boolean)[0];
+    if (e) return { error: /referencia_alineacion/.test(e) || /does not exist|schema cache/i.test(e) ? 'Falta correr el script 21 de la base (referencias de alineación). ' + e : e };
+    var vistas = {}, claves = [];
+    rs[0].datos.forEach(function (p) { var k = p.recorrido + '|' + p.via; if (!vistas[k]) { vistas[k] = 1; claves.push({ rec: p.recorrido, via: p.via, orden: p.id }); } });
+    var ordRec = {}; claves.forEach(function (k) { if (ordRec[k.rec] == null || k.orden < ordRec[k.rec]) ordRec[k.rec] = k.orden; });
+    claves.sort(function (a, b) { return ordRec[a.rec] - ordRec[b.rec] || ORD_VIA.indexOf(a.via) - ORD_VIA.indexOf(b.via); });
+    var N = {}; (rs[2].datos || []).forEach(function (p) { N[p.id] = p.nombre; });
+    return { vp: vp, claves: claves, piq: rs[0].datos, refs: rs[1].datos || [], quien: function (id) { return id ? (N[id] || 'usuario ' + String(id).slice(0, 8)) : null; } };
+  }
+
+  Rutas.definir('/admin/referencias', { pantalla: pantalla, titulo: 'Referencias de alineación', pestana: 'admin', requiere: 'admin' });
+})(window);
+</script>
 <script>/* js/version.js */
 /* =====================================================================
  * version.js — c55/c56 · Versión de la plataforma y aviso de versión nueva
@@ -11069,7 +11854,7 @@ if (typeof module !== "undefined") module.exports = { combinadas: combinadas, el
  * ===================================================================== */
 (function (global) {
   'use strict';
-  var VERSION = { id: 'V1.009', tarea: 'c30', fecha: '17/11/2026', publicado: '2026-11-17T12:00' };
+  var VERSION = { id: 'V1.010', tarea: 'c51', fecha: '17/11/2026', publicado: '2026-11-17T22:00' };
   global.APP_VERSION = VERSION;
 
   var CADA_MS = 30 * 60 * 1000;
